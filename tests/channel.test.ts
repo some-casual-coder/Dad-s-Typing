@@ -109,6 +109,17 @@ describe("inbound", () => {
     }
   });
 
+  it("accepts a business-scoped WhatsApp id when it is allowlisted", async () => {
+    const keep = process.env.WHATSAPP_ALLOWED_SENDERS;
+    process.env.WHATSAPP_ALLOWED_SENDERS = "KE.13491208655302741918";
+    try {
+      expect((await signed(inbound, IN, msg({ sender: "KE.13491208655302741918" }))).json.status).toBe("accepted");
+      expect((await signed(inbound, IN, msg({ sender: "KE.99999999999999999999" }))).json.status).toBe("ignored");
+    } finally {
+      process.env.WHATSAPP_ALLOWED_SENDERS = keep;
+    }
+  });
+
   it("validates the payload", async () => {
     for (const bad of [{ sender: "abc" }, { providerMessageId: "bad id!" }, { image: { mime: "image/gif", base64: "AAAA" } }, { image: { mime: "image/png", base64: "***" } }, { text: "", image: undefined }, { receivedAt: "nope" }]) {
       expect((await signed(inbound, IN, msg(bad))).status).toBe(422);
