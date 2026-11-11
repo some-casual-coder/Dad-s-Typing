@@ -166,7 +166,7 @@ describe("payment failure paths", () => {
     expect((await getTaskView(f.taskId, f.mum)).nextAction).toBe("checking_payment");
     expect((await getTaskView(f.taskId, f.mum)).receipt).toBeNull();
 
-    // a restart keeps no memory: the job rediscovers the open attempt from the database
+    // a restart keeps no memory; the open attempt comes back from the DB
     const open = (await listOpenAttempts()).find((a) => a.id === att.id)!;
     expect(open.paypalOrderId).toBe(pp);
     expect((await settleCapture(open.id, { ...completed, paypalOrderId: pp, captureId: `CAP-${pp}` })).order).toBe("paid");
@@ -242,5 +242,46 @@ describe("access", () => {
   it("payable offers must carry merchant, sku and confirmed shipping", async () => {
     const s = await scenario();
     await expect(recordOffers(s.taskId, [offer("BAD", "top", { shippingMinor: null })])).rejects.toMatchObject({ code: "invalid" });
+  });
+});
+
+describe("invite scope", () => {
+  it("the creator, a requester and a helper can each mint only what they may", async () => {
+    const nathan = await createTask({ title: "x", starterRoles: ["helper", "payer"] });
+    const mum = await createInvite(nathan.taskId, nathan.token, { roles: ["requester", "chooser"] });
+    const helper = await createInvite(nathan.taskId, nathan.token, { roles: ["helper"] });
+    for (const roles of [["requester"], ["chooser"], ["payer"]] as const) {
+      await expect(createInvite(nathan.taskId, helper.token, { roles: [...roles] })).rejects.toMatchObject({ code: "forbidden" });
+    }
+    await createInvite(nathan.taskId, helper.token, { roles: ["helper"] });
+    await createInvite(nathan.taskId, mum.token, { roles: ["payer"] });
+    const payer = await createInvite(nathan.taskId, mum.token, { roles: ["payer"] });
+    await expect(createInvite(nathan.taskId, payer.token, { roles: ["helper"] })).rejects.toMatchObject({ code: "forbidden" });
+  });
+});
+
+describe("recovery and stale orders", () => {
+  it("a new attempt is refused for an order whose choice was replaced", async () => {
+    const f = await frozenOrder();
+    await recordOffers(f.taskId, [offer("TOP-2", "top")]);
+    const cmp = await getComparison(f.taskId, f.mum);
+    await selectOffer(f.taskId, f.mum, { offerId: cmp.offers.find((o) => o.sku === "TOP-2")!.id, expectedVersion: cmp.version }, { idempotencyKey: key() });
+    await expect(beginAttempt(f.taskId, f.nathan, f.order.id)).rejects.toMatchObject({ code: "stale" });
+    const n = await pool.query(`SELECT count(*)::int AS n FROM payment_attempts WHERE seller_order_id=$1`, [f.order.id]);
+    expect(n.rows[0].n).toBe(0);
+  });
+
+  it("a cancelled attempt whose capture may have landed is still reconciled", async () => {
+    const f = await frozenOrder();
+    const pp = key();
+    const att = await beginAttempt(f.taskId, f.nathan, f.order.id);
+    await recordProviderOrder(att.id, pp);
+    const op = await operationFor(att.id, "capture");
+    await markOperation(op.requestId, "unknown");
+    await settleCapture(att.id, { paypalOrderId: pp, status: "CANCELLED" });
+    expect((await listOpenAttempts()).some((a) => a.id === att.id)).toBe(true);
+    const r = await settleCapture(att.id, { ...completed, paypalOrderId: pp, captureId: `CAP-${pp}` });
+    expect(r.order).toBe("paid");
+    expect((await listOpenAttempts()).some((a) => a.id === att.id)).toBe(false);
   });
 });

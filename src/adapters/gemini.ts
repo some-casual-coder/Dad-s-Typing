@@ -1,5 +1,5 @@
 import type { Op } from "@/domain/eligibility";
-import { failFor, jsonOf, send } from "./http";
+import { failFor, jsonOf, MODEL_TIMEOUT_MS, send } from "./http";
 import { AdapterError, type InterpretInput, type Interpretation, type Interpreter, type ProposedRequirement } from "./types";
 
 const KEYS = {
@@ -109,7 +109,7 @@ export class GeminiInterpreter implements Interpreter {
         contents: [{ role: "user", parts }],
         generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.2, thinkingConfig: { thinkingLevel: "low" } },
       }),
-    });
+    }, MODEL_TIMEOUT_MS);
     const r = await withRetry(request);
     if (!r.ok) throw failFor(r.status, "Gemini");
     const j = await jsonOf(r, "Gemini");

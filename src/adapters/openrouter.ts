@@ -1,5 +1,5 @@
 import { SCHEMA, SYSTEM, validateInterpretation, withRetry } from "./gemini";
-import { failFor, jsonOf, send } from "./http";
+import { failFor, jsonOf, MODEL_TIMEOUT_MS, send } from "./http";
 import { AdapterError, type InterpretInput, type Interpretation, type Interpreter } from "./types";
 
 type Schema = Record<string, unknown>;
@@ -37,10 +37,11 @@ export class OpenRouterInterpreter implements Interpreter {
       body: JSON.stringify({
         model: this.model,
         temperature: 0.2,
+        reasoning: { effort: "low" },
         messages: [{ role: "system", content: SYSTEM }, { role: "user", content }],
         response_format: { type: "json_schema", json_schema: { name: "interpretation", schema: JSON_SCHEMA } },
       }),
-    });
+    }, MODEL_TIMEOUT_MS);
     const r = await withRetry(request);
     if (!r.ok) throw failFor(r.status, "OpenRouter");
     const j = (await jsonOf(r, "OpenRouter")) as { choices?: { message?: { content?: unknown } }[] };

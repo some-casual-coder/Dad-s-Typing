@@ -2,7 +2,7 @@ import { getPayments } from "@/adapters";
 import { AdapterError } from "@/adapters/types";
 import { getPayerAttempt } from "@/domain/attempts";
 import { DomainError } from "@/domain/errors";
-import { markOperation, operationFor, settleCapture, type ObservedCapture } from "@/domain/payments";
+import { isTerminalFailure, markOperation, operationFor, settleCapture, type ObservedCapture } from "@/domain/payments";
 import { getTaskView } from "@/domain/view";
 import { attemptRef, bearer, handle, json, readJson, uuid } from "../../../../_lib/http";
 
@@ -25,6 +25,13 @@ export const POST = handle<{ id: string }>(async (req, { id }) => {
   try {
     obs = await payments.capture(a.paypalOrderId, op.requestId);
   } catch (e) {
+    if (e instanceof AdapterError && e.kind === "rejected") {
+      // an expired or voided order cannot be captured; free the attempt
+      obs = await payments.getOrder(a.paypalOrderId).catch(() => null);
+      if (!obs || !isTerminalFailure(obs.status)) throw e;
+      const s = await settleCapture(a.id, obs);
+      return respond(s.attempt.status, s.flagged);
+    }
     if (!(e instanceof AdapterError) || e.kind !== "timeout") throw e;
     await markOperation(op.requestId, "unknown");
     // One look at PayPal; still unclear means we keep checking later

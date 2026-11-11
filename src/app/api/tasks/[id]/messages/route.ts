@@ -1,5 +1,7 @@
 import { getInterpreter } from "@/adapters";
 import { AdapterError, type Interpretation } from "@/adapters/types";
+import { resolveGrant } from "@/domain/access";
+import { DomainError } from "@/domain/errors";
 import { getExchange, listMessages, recordAssistantMessage } from "@/domain/messages";
 import { addMessage, getComparison } from "@/domain/tasks";
 import { bearer, handle, invalid, json, rateLimit, readJson, str, uuid } from "../../../_lib/http";
@@ -14,9 +16,11 @@ export const GET = handle<{ id: string }>(async (req, { id }) =>
 export const POST = handle<{ id: string }>(async (req, { id }) => {
   const token = bearer(req);
   const taskId = uuid(id);
-  rateLimit(`msg:${taskId}`, 30);
+  const grant = await resolveGrant(taskId, token, "message");
+  rateLimit(`msg:${grant.id}`, 30);
   const b = await readJson(req, Math.ceil(MAX_IMAGE * 1.4) + 10_000);
   const clientMessageId = str(b, "clientMessageId", { max: 100, min: 1 })!;
+  const key = `${grant.id}:${clientMessageId}`;
   const text = str(b, "text", { max: 2000, optional: true });
   const imageBase64 = str(b, "imageBase64", { max: Math.ceil(MAX_IMAGE * 1.4), optional: true });
   const mime = str(b, "mime", { max: 20, optional: true });
@@ -29,10 +33,12 @@ export const POST = handle<{ id: string }>(async (req, { id }) => {
 
   // Only the fact of an attachment is stored; the bytes live for this call
   const added = await addMessage(taskId, token, {
-    channel: "browser", providerMessageId: `${taskId}:${clientMessageId}`, body: text ?? "", mediaRef: imageBase64 ? "inline:attached" : undefined,
+    channel: "browser", providerMessageId: key, body: text ?? "", mediaRef: imageBase64 ? "inline:attached" : undefined,
   });
   if (added.duplicate) {
-    return json(await getExchange(taskId, token, clientMessageId));
+    const done = await getExchange(taskId, token, key);
+    if (done.messages.length < 2) throw new DomainError("conflict", "Still working on that message; send it again in a moment");
+    return json(done);
   }
 
   const { requirements } = await getComparison(taskId, token);
@@ -49,6 +55,6 @@ export const POST = handle<{ id: string }>(async (req, { id }) => {
   const proposals = (result?.proposedRequirements ?? []).slice(0, 10);
   const clarification = result?.clarification ?? null;
   const reply = (result?.reply || FALLBACK).slice(0, 2000);
-  await recordAssistantMessage(taskId, reply, { clientMessageId, result: { proposals, clarification } });
-  return json(await getExchange(taskId, token, clientMessageId));
+  await recordAssistantMessage(taskId, reply, { key, result: { proposals, clarification } });
+  return json(await getExchange(taskId, token, key));
 });

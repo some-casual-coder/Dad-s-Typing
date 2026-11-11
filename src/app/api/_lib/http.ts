@@ -90,4 +90,6 @@ export function rateLimit(key: string, max: number, windowMs = 60_000) {
   if (++h.n > max) throw new HttpError(429, "rate_limited", "Too many requests, slow down");
 }
 
-export const clientIp = (req: Request) => req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+// x-forwarded-for is spoofable unless a trusted proxy sets it
+export const clientIp = (req: Request) =>
+  process.env.TRUST_PROXY === "1" ? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local" : "local";

@@ -1,4 +1,5 @@
 import "./env";
+process.env.TRUST_PROXY = "1";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdapterError } from "@/adapters/types";
 import { pool } from "@/domain/db";
@@ -32,12 +33,14 @@ import { POST as select } from "@/app/api/tasks/[id]/selection/route";
 import { POST as order } from "@/app/api/tasks/[id]/order/route";
 import { POST as payCreate } from "@/app/api/tasks/[id]/pay/create/route";
 import { POST as payCapture } from "@/app/api/tasks/[id]/pay/capture/route";
+import { POST as payCancel } from "@/app/api/tasks/[id]/pay/cancel/route";
 
 type Call = (req: Request, ctx?: never) => Promise<Response>;
+let ipSeq = 0;
 async function call(h: unknown, method: string, path: string, token: string | null, body?: unknown, params: Record<string, string> = {}) {
   const req = new Request(`http://localhost${path}`, {
     method, body: body === undefined ? undefined : JSON.stringify(body),
-    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json" },
+    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json", "x-forwarded-for": `10.1.${Math.floor(ipSeq / 250)}.${ipSeq++ % 250}` },
   });
   const res = await (h as Call)(req, { params: Promise.resolve(params) } as never);
   const text = await res.text();
@@ -217,3 +220,62 @@ describe("payment", () => {
   });
 });
 
+
+describe("review fixes", () => {
+  it("cancel asks PayPal first when a capture may be in flight", async () => {
+    const o = await toOrder();
+    const c = await call(payCreate, "POST", "", o.nathan, { orderId: o.orderId }, o.p);
+    payments.capture.mockRejectedValue(new AdapterError("timeout", "slow"));
+    payments.getOrder.mockResolvedValue({ paypalOrderId: c.json.paypalOrderId, status: "APPROVED" });
+    expect((await call(payCapture, "POST", "", o.nathan, { paypalOrderId: c.json.paypalOrderId }, o.p)).status).toBe(202);
+    payments.getOrder.mockResolvedValue(completed(c.json.paypalOrderId));
+    await call(payCancel, "POST", "", o.nathan, { paypalOrderId: c.json.paypalOrderId }, o.p);
+    expect((await call(getTask, "GET", "", o.mum, undefined, o.p)).json.nextAction).toBe("paid");
+  });
+
+  it("a voided PayPal order frees the attempt so a fresh one can start", async () => {
+    const o = await toOrder();
+    const c = await call(payCreate, "POST", "", o.nathan, { orderId: o.orderId }, o.p);
+    payments.capture.mockRejectedValue(new AdapterError("rejected", "422"));
+    payments.getOrder.mockResolvedValue({ paypalOrderId: c.json.paypalOrderId, status: "VOIDED" });
+    const cap = await call(payCapture, "POST", "", o.nathan, { paypalOrderId: c.json.paypalOrderId }, o.p);
+    expect(cap.json.attempt.status).toBe("failed");
+    const again = await call(payCreate, "POST", "", o.nathan, { orderId: o.orderId }, o.p);
+    expect(again.status).toBe(200);
+    expect(again.json.attemptId).not.toBe(c.json.attemptId);
+  });
+
+  it("reconcile settles terminal readings, not only completed ones", async () => {
+    const o = await toOrder();
+    const c = await call(payCreate, "POST", "", o.nathan, { orderId: o.orderId }, o.p);
+    payments.getOrder.mockResolvedValue({ paypalOrderId: c.json.paypalOrderId, status: "EXPIRED" });
+    await reconcileOpenAttempts(payments);
+    expect((await listOpenAttempts()).some((a) => a.id === c.json.attemptId)).toBe(false);
+  });
+
+  it("a helper cannot mint a requester through the API", async () => {
+    const s = await setup();
+    const h = await call(invite, "POST", "", s.mum, { roles: ["helper"] }, s.p);
+    expect((await call(invite, "POST", "", h.json.token, { roles: ["requester"] }, s.p)).status).toBe(403);
+    expect((await call(invite, "POST", "", h.json.token, { roles: ["helper"] }, s.p)).status).toBe(201);
+  });
+
+  it("the same client message id from two grants is two exchanges", async () => {
+    const s = await setup();
+    interpret.mockResolvedValue({ observations: [], proposedRequirements: [], clarification: null, reply: "hi" });
+    const h = await call(invite, "POST", "", s.mum, { roles: ["helper"] }, s.p);
+    const body = { clientMessageId: "same-id", text: "hello" };
+    expect((await call(postMsg, "POST", "", s.mum, body, s.p)).status).toBe(200);
+    expect((await call(postMsg, "POST", "", h.json.token, body, s.p)).status).toBe(200);
+    expect(interpret).toHaveBeenCalledTimes(2);
+  });
+
+  it("junk bearers do not spend a real participant's message budget", async () => {
+    const s = await setup();
+    interpret.mockResolvedValue({ observations: [], proposedRequirements: [], clarification: null, reply: "hi" });
+    for (let i = 0; i < 40; i++) {
+      expect((await call(postMsg, "POST", "", "x".repeat(31) + (i % 10), { clientMessageId: `j${i}`, text: "x" }, s.p)).status).toBe(404);
+    }
+    expect((await call(postMsg, "POST", "", s.mum, { clientMessageId: "real", text: "hi" }, s.p)).status).toBe(200);
+  });
+});

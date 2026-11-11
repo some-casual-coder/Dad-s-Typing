@@ -55,9 +55,7 @@ export default function TaskPage({ taskId }: { taskId: string }) {
       const wait = Math.min(POLL_MS * 2 ** Math.min(failures.current, 3), 30000);
       timer.current = setTimeout(tick, wait);
     };
-    const vis = () => {
-      if (!document.hidden) { if (timer.current) clearTimeout(timer.current); void tick(); }
-    };
+    const vis = () => { if (!document.hidden) void load(); };
     void tick();
     document.addEventListener("visibilitychange", vis);
     return () => { stop = true; if (timer.current) clearTimeout(timer.current); document.removeEventListener("visibilitychange", vis); };

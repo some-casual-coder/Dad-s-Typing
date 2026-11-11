@@ -8,6 +8,7 @@ type Row = Record<string, unknown>;
 export type OperationKind = "create" | "capture" | "refund";
 
 const FAILED = new Set(["DECLINED", "DENIED", "FAILED", "VOIDED", "EXPIRED"]);
+export const isTerminalFailure = (status: string) => FAILED.has(status.toUpperCase());
 const OPEN = "('created','approved','pending')";
 
 async function operationRow(c: Tx, attemptId: string, kind: OperationKind) {
@@ -39,6 +40,8 @@ export async function beginAttempt(taskId: string, token: string, orderId: strin
     if (o.status === "paid") throw new DomainError("conflict", "Already paid");
     const open = (await c.query(`SELECT * FROM payment_attempts WHERE seller_order_id=$1 AND status IN ${OPEN}`, [orderId])).rows[0];
     if (open) return attemptView(c, open, true);
+    const live = (await c.query(`SELECT s.superseded_at, t.cancelled_at FROM selections s JOIN tasks t ON t.id=s.task_id WHERE s.id=$1`, [o.selection_id])).rows[0];
+    if (!live || live.superseded_at || live.cancelled_at) throw new DomainError("stale", "The choice changed; it needs a fresh review");
     const a = (await c.query(
       `INSERT INTO payment_attempts (id,seller_order_id,created_by) VALUES ($1,$2,$3) RETURNING *`,
       [randomUUID(), orderId, g.id],
@@ -68,9 +71,14 @@ export interface ObservedCapture {
   amountMinor?: number; currency?: string; payeeMerchantId?: string;
 }
 
-// Attempts still unresolved, for the reconciliation job after a restart
+// Unresolved attempts, plus cancelled ones whose capture may have landed
 export async function listOpenAttempts() {
-  const { rows } = await tx((c) => c.query(`SELECT id, seller_order_id, paypal_order_id, status FROM payment_attempts WHERE status IN ${OPEN} ORDER BY created_at`));
+  const { rows } = await tx((c) => c.query(
+    `SELECT a.id, a.seller_order_id, a.paypal_order_id, a.status FROM payment_attempts a
+      WHERE a.status IN ${OPEN}
+         OR (a.status IN ('cancelled','failed') AND EXISTS (
+              SELECT 1 FROM payment_operations p WHERE p.attempt_id = a.id AND p.kind = 'capture' AND p.status IN ('started','unknown')))
+      ORDER BY a.created_at`));
   return rows.map((r) => ({ id: r.id as string, orderId: r.seller_order_id as string, paypalOrderId: r.paypal_order_id as string | null, status: r.status as string }));
 }
 
@@ -130,4 +138,9 @@ async function attemptView(c: Tx, a: Row, resumed: boolean) {
     id: a.id as string, orderId: a.seller_order_id as string, createRequestId: op.request_id as string,
     paypalOrderId: a.paypal_order_id as string | null, status: a.status as string, captureId: a.capture_id as string | null, resumed,
   };
+}
+
+export async function hasCaptureOperation(attemptId: string) {
+  const r = await tx((c) => c.query(`SELECT 1 FROM payment_operations WHERE attempt_id=$1 AND kind='capture' AND status <> 'failed'`, [attemptId]));
+  return r.rowCount! > 0;
 }

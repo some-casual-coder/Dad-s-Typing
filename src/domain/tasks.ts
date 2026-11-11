@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { authorize, can, hashToken, newToken, type Role } from "./access";
+import { authorize, can, canMint, hashToken, newToken, type Role } from "./access";
 import { tx, type Tx } from "./db";
 import { DomainError } from "./errors";
 import { evaluate, type Attribute, type Op, type Requirement } from "./eligibility";
@@ -25,7 +25,7 @@ export async function createTask(input: {
     ]);
     const token = newToken();
     const grantId = randomUUID();
-    await c.query(`INSERT INTO grants (id,task_id,token_hash,roles,label) VALUES ($1,$2,$3,$4,$5)`, [
+    await c.query(`INSERT INTO grants (id,task_id,token_hash,roles,label,can_delegate) VALUES ($1,$2,$3,$4,$5,true)`, [
       grantId, taskId, hashToken(token), roles, input.starterLabel ?? "",
     ]);
     await logEvent(c, taskId, grantId, "task.created", { roles });
@@ -39,9 +39,7 @@ export async function createInvite(taskId: string, token: string, input: {
   return tx(async (c) => {
     const issuer = await authorize(c, taskId, token, "invite");
     if (!input.roles.length || input.roles.some((r) => !ROLES.includes(r))) throw new DomainError("invalid", "Bad roles");
-    // Only a requester or payer may designate who pays
-    if (input.roles.includes("payer") && !issuer.roles.some((r) => r === "requester" || r === "payer"))
-      throw new DomainError("forbidden", "Only the requester or payer can designate a payer");
+    if (input.roles.some((r) => !canMint(issuer, r))) throw new DomainError("forbidden", "You cannot give that role");
     const t = newToken();
     const id = randomUUID();
     const ttl = input.ttlMinutes ?? 60 * 24;
