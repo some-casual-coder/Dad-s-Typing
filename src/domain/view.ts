@@ -1,5 +1,6 @@
 import { authorize, can } from "./access";
 import { tx } from "./db";
+import { refundSummary } from "./refunds";
 import { orderView } from "./tasks";
 
 export type NextAction =
@@ -26,15 +27,16 @@ export async function getTaskView(taskId: string, token: string) {
     else next = "waiting_for_input";
 
     const showOrder = ord && can(g.roles, "review_order");
+    const refunds = ord?.status === "paid" ? await refundSummary(c, ord.id) : { refundedMinor: 0, refundPendingMinor: 0 };
     const viewer = { roles: g.roles };
     return {
       id: t.id, title: t.title, purpose: t.purpose, version: t.version as number, nextAction: next, viewer,
       requirements: reqs,
       selection: sel ? { id: sel.id, stale, title: sel.offer_snapshot.title, seller: sel.offer_snapshot.seller, route: sel.offer_snapshot.route, reason: sel.reason, chosenAt: sel.created_at } : null,
       // order detail is payer-only; the receipt is shared
-      order: showOrder ? orderView(ord) : null,
+      order: showOrder ? { ...orderView(ord), ...refunds } : null,
       receipt: ord?.status === "paid"
-        ? { seller: ord.seller, title: ord.title, sku: ord.sku, currency: ord.currency, totalMinor: ord.total_minor, taskId: t.id }
+        ? { seller: ord.seller, title: ord.title, sku: ord.sku, currency: ord.currency, totalMinor: ord.total_minor, taskId: t.id, ...refunds }
         : null,
     };
   });

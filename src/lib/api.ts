@@ -13,9 +13,11 @@ export interface Requirement {
 export interface OrderView {
   id: string; seller: string; sku: string; title: string; quantity: number;
   currency: string; itemMinor: number; shippingMinor: number | null; totalMinor: number; status: string;
+  refundedMinor?: number; refundPendingMinor?: number;
 }
 export interface Receipt {
   seller: string; title: string; sku: string; currency: string; totalMinor: number; taskId: string;
+  refundedMinor?: number; refundPendingMinor?: number;
 }
 export interface TaskView {
   id: string; title: string; purpose?: string | null; version: number; nextAction: NextAction;
@@ -46,17 +48,19 @@ export const storeToken = (taskId: string, token: string) => {
 };
 
 async function call<T>(
-  method: string, path: string, opts: { token?: string | null; body?: unknown; idem?: boolean } = {},
+  method: string, path: string, opts: { token?: string | null; body?: unknown; idem?: boolean; signal?: AbortSignal } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  if (opts.body !== undefined && !(opts.body instanceof FormData)) headers["Content-Type"] = "application/json";
   if (opts.idem) headers["Idempotency-Key"] = newId();
   let res: Response;
   try {
     res = await fetch(path, {
       method, headers, cache: "no-store",
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      signal: opts.signal,
+      body: opts.body === undefined ? undefined
+        : opts.body instanceof FormData ? opts.body : JSON.stringify(opts.body),
     });
   } catch {
     throw new ApiError(0, "network", "Can't reach the server. Check your connection.");
@@ -75,6 +79,11 @@ const t = (id: string) => `/api/tasks/${encodeURIComponent(id)}`;
 export const api = {
   createTask: (body: { title: string; starterRoles: Role[]; label?: string }) =>
     call<{ taskId: string; token: string }>("POST", "/api/tasks", { body }),
+  transcribe: (id: string, token: string, audio: Blob, signal?: AbortSignal) => {
+    const body = new FormData();
+    body.append("audio", audio, "recording");
+    return call<{ text: string; language?: string }>("POST", `${t(id)}/transcribe`, { token, body, signal });
+  },
   getTask: (id: string, token: string) => call<TaskView>("GET", t(id), { token }),
   getComparison: (id: string, token: string) => call<Comparison>("GET", `${t(id)}/comparison`, { token }),
   getMessages: (id: string, token: string) =>

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { seedDemoOffers, seedExternalOffers } from "@/catalog/demo";
 import { postExchange } from "@/chat/exchange";
+import { validateImage } from "@/chat/image";
 import { tx } from "@/domain/db";
 import { DomainError } from "@/domain/errors";
 import { createTask } from "@/domain/tasks";
@@ -12,7 +13,6 @@ const MAX_ATTEMPTS = 5;
 const GRANT_DAYS = 14;
 const CONSENT = "Photos and messages you send are read by an AI service to help with this task.";
 const SORRY = "Sorry, I could not process that message. Please send it again.";
-const MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_IMAGE_B64 = Math.ceil(4 * 1024 * 1024 * 1.4);
 
 export interface InboundInput {
@@ -31,8 +31,9 @@ export function parseInbound(def: ChannelDef, b: Record<string, unknown>): Inbou
   if (image !== undefined) {
     if (!def.images) throw new DomainError("invalid", "this channel does not accept images");
     const o = image as Record<string, unknown>;
-    if (typeof o !== "object" || o === null || typeof o.mime !== "string" || !MIMES.has(o.mime)) throw new DomainError("invalid", "image mime");
-    if (typeof o.base64 !== "string" || o.base64.length > MAX_IMAGE_B64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(o.base64)) throw new DomainError("invalid", "image data");
+    if (typeof o !== "object" || o === null || typeof o.mime !== "string") throw new DomainError("invalid", "image mime");
+    if (typeof o.base64 !== "string" || o.base64.length > MAX_IMAGE_B64) throw new DomainError("invalid", "image data");
+    validateImage(o.mime, o.base64);
     img = { mime: o.mime, base64: o.base64 };
   }
   if (!text?.trim() && !img) throw new DomainError("invalid", "empty message");

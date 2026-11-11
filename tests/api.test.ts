@@ -1,5 +1,6 @@
 import "./env";
 process.env.TRUST_PROXY = "1";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdapterError } from "@/adapters/types";
 import { pool } from "@/domain/db";
@@ -7,7 +8,7 @@ import { listOpenAttempts } from "@/domain/payments";
 import { reconcileOpenAttempts } from "@/payments/reconcile";
 
 const interpret = vi.fn();
-const payments = { createOrder: vi.fn(), capture: vi.fn(), getOrder: vi.fn() };
+const payments = { createOrder: vi.fn(), capture: vi.fn(), getOrder: vi.fn(), refundCapture: vi.fn(), getRefund: vi.fn(), getCapture: vi.fn(), verifyWebhook: vi.fn() };
 
 vi.mock("@/adapters", async () => ({
   getInterpreter: () => ({ interpret }),
@@ -118,7 +119,7 @@ describe("messages", () => {
   it("model failure gives a recoverable reply; image bytes are not stored", async () => {
     const s = await setup();
     interpret.mockRejectedValue(new AdapterError("timeout", "slow"));
-    const r = await call(postMsg, "POST", "", s.mum, body({ imageBase64: Buffer.from("fake").toString("base64"), mime: "image/png" }), s.p);
+    const r = await call(postMsg, "POST", "", s.mum, body({ imageBase64: readFileSync("tests/fixtures/carrier.png").toString("base64"), mime: "image/png" }), s.p);
     expect(r.status).toBe(200);
     expect(r.json.messages[1].body).toMatch(/could not read/);
     const list = await call(listMsgs, "GET", "", s.mum, undefined, s.p);
@@ -134,6 +135,7 @@ describe("messages", () => {
     expect((await call(postMsg, "POST", "", a.mum, body({ text: "x".repeat(2001) }), a.p)).status).toBe(422);
     expect((await call(postMsg, "POST", "", a.mum, body({ imageBase64: "AAAA", mime: "image/gif" }), a.p)).status).toBe(422);
     expect((await call(postMsg, "POST", "", a.mum, body({ imageBase64: "A".repeat(5_600_000), mime: "image/png" }), a.p)).status).toBe(422);
+    expect((await call(postMsg, "POST", "", a.mum, body({ imageBase64: Buffer.from("fake").toString("base64"), mime: "image/png" }), a.p)).status).toBe(422);
     await call(postMsg, "POST", "", a.mum, body({ clientMessageId: "secret" }), a.p);
     expect((await call(listMsgs, "GET", "", b.mum, undefined, a.p)).status).toBe(404);
     expect((await call(listMsgs, "GET", "", b.mum, undefined, b.p)).json.messages).toHaveLength(0);

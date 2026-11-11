@@ -15,7 +15,9 @@ tied to the same task.
 | AI | Real model calls (Gemini through Google or OpenRouter) that propose requirements. The person confirms them; the model cannot choose, pay or change roles. |
 | Offers | A clearly labelled **demo seller** ("Whisker & Co (demo)") is the only payable seller. Channel3 results (US/GB) appear as external "View at retailer" links and are never payable here. |
 | Chat | A browser simulation. It is **not** WhatsApp. WhatsApp is a separate later adapter. |
-| Not built yet | Voice, webhooks (needs a public HTTPS URL), refunds, WhatsApp. |
+| Refunds | Operator-only, sandbox. There is no public refund control and no merchant UI: a signed local command (`scripts/operator-refund.mjs`, needs `OPERATOR_SECRET`) issues them. Buyers see refunded and pending amounts on the receipt, separate from the payment. |
+| Webhook | `POST /api/webhooks/paypal` is off unless `PAYPAL_WEBHOOK_ID` is set and a reachable HTTPS URL is registered on the sandbox app. Without it the app reconciles payments and refunds by polling PayPal. |
+| Not built yet | WhatsApp (and whatever else is listed as pending above). |
 
 ## Run it locally
 
@@ -80,6 +82,15 @@ node --env-file=.env.local scripts/channel-sim.mjs sms 254700000009 "a cat carri
 `connectors/whatsapp` is a WhatsApp connector (Go, Whatsmeow, an unofficial client; see its README
 for the risks and for pairing). The browser chat is the built-in connector. The browser path keeps
 working when any connector is down.
+
+## Voice
+
+Push-to-talk on the chat: press Speak, talk for up to 20 seconds, Stop or Cancel, then check and edit the transcript before using it. Nothing is sent automatically and a transcript never authorises payment or any other action; you still press Send.
+
+- Audio goes to the server route `POST /api/tasks/:id/transcribe` (message permission, rate limited, max 2.5 MB; webm, ogg or mp4 only) and on to the speech-to-text model set by `STT_MODEL` via OpenRouter. The server does not keep the audio.
+- Needs HTTPS or localhost for microphone access and a browser with MediaRecorder. If voice is unavailable the text box works as before.
+- Read aloud uses the browser speech synthesis where present; the full text always stays on screen.
+- Checked so far: Chrome (desktop) recording and transcription with a synthetic audio source. Safari/iOS, Firefox and real microphone speech are not yet tested.
 
 ## Checks
 

@@ -1,5 +1,6 @@
 import { listOpenAttempts, settleCapture } from "@/domain/payments";
 import type { Payments } from "@/adapters/types";
+import { reconcileRefunds } from "@/domain/refunds";
 
 export async function reconcileOpenAttempts(payments: Payments) {
   const out = { checked: 0, settled: 0, errors: 0 };
@@ -13,5 +14,7 @@ export async function reconcileOpenAttempts(payments: Payments) {
       out.errors++;
     }
   }
-  return out;
+  // refunds are reconciled from the API too, with or without a webhook
+  const refunds = await reconcileRefunds(payments);
+  return { ...out, refunds };
 }

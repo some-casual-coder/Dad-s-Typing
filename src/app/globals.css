@@ -93,3 +93,6 @@ details { min-width: 0; }
   .page { padding: 32px 24px 64px; gap: 20px; } h1 { font-size: 2.1rem; } .hero h1 { font-size: 2.6rem; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.small { font-size: .9rem; }

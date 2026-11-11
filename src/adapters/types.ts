@@ -1,5 +1,6 @@
 import type { Attribute, Op } from "@/domain/eligibility";
 import type { ObservedCapture } from "@/domain/payments";
+import type { ObservedRefund } from "@/domain/refunds";
 
 export class AdapterError extends Error {
   constructor(readonly kind: "timeout" | "rejected" | "unavailable", message: string) {
@@ -47,4 +48,23 @@ export interface Payments {
   createOrder(i: CreateOrderInput): Promise<{ paypalOrderId: string; approveUrl: string }>;
   capture(paypalOrderId: string, requestId: string): Promise<ObservedCapture>;
   getOrder(paypalOrderId: string): Promise<ObservedCapture>;
+  // no amountMinor means a full refund (empty body, as documented)
+  refundCapture(captureId: string, i: { amountMinor?: number; currency: string; requestId: string }): Promise<ObservedRefund>;
+  getRefund(refundId: string): Promise<ObservedRefund>;
+  getCapture(captureId: string): Promise<ObservedCaptureFact>;
+  verifyWebhook(i: WebhookVerification): Promise<boolean>;
+}
+
+export interface ObservedCaptureFact { captureId: string; status: string; amountMinor?: number; currency?: string }
+
+// Transmission headers plus the exact raw event text, forwarded to PayPal only
+export interface WebhookVerification {
+  transmissionId: string; transmissionTime: string; transmissionSig: string;
+  certUrl: string; authAlgo: string; webhookId: string; rawEvent: string;
+}
+
+export type AudioFormat = "webm" | "ogg" | "m4a";
+
+export interface Transcriber {
+  transcribe(input: { audio: Uint8Array; format: AudioFormat }): Promise<{ text: string; language?: string }>;
 }

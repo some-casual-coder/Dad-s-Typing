@@ -69,6 +69,8 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
             </>
           )}
           {order.status === "paid" && <p role="status">Paid.</p>}
+          {!!order.refundedMinor && <p role="status">Refunded: {formatMoney(order.refundedMinor, order.currency)}</p>}
+          {!!order.refundPendingMinor && <p role="status">Refund pending: {formatMoney(order.refundPendingMinor, order.currency)}</p>}
           {order.status === "failed" && <p className="error">The payment did not go through. You can review the order again.</p>}
         </>
       )}

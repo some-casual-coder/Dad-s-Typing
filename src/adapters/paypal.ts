@@ -1,7 +1,8 @@
 import { fromDecimalString, toDecimalString } from "@/domain/money";
 import type { ObservedCapture } from "@/domain/payments";
+import type { ObservedRefund } from "@/domain/refunds";
 import { failFor, jsonOf, send } from "./http";
-import { AdapterError, type CreateOrderInput, type Payments } from "./types";
+import { AdapterError, type CreateOrderInput, type ObservedCaptureFact, type Payments, type WebhookVerification } from "./types";
 
 const SANDBOX = "https://api-m.sandbox.paypal.com";
 
@@ -27,6 +28,25 @@ export function mapOrder(order: unknown): ObservedCapture {
     paypalOrderId: id, captureId: str(cap.id), status: str(cap.status) ?? "UNKNOWN", currency, payeeMerchantId,
     amountMinor: currency && value ? fromDecimalString(value, currency) : undefined,
   };
+}
+
+function moneyOf(v: unknown) {
+  const a = obj(v);
+  const currency = str(a.currency_code);
+  const value = str(a.value);
+  if (!currency || !value) return {};
+  try {
+    return { currency, amountMinor: fromDecimalString(value, currency) };
+  } catch {
+    throw new AdapterError("unavailable", "PayPal amount invalid");
+  }
+}
+
+export function mapRefund(j: unknown): ObservedRefund {
+  const o = obj(j);
+  const refundId = str(o.id);
+  if (!refundId) throw new AdapterError("unavailable", "PayPal refund has no id");
+  return { refundId, status: str(o.status) ?? "UNKNOWN", ...moneyOf(o.amount) };
 }
 
 export class PayPalPayments implements Payments {
@@ -100,6 +120,48 @@ export class PayPalPayments implements Payments {
     const res = await this.call("GET", `/v2/checkout/orders/${encodeURIComponent(paypalOrderId)}`);
     if (!res.ok) throw failFor(res.status, "PayPal get order");
     return mapOrder(res.json);
+  }
+
+  async refundCapture(captureId: string, i: { amountMinor?: number; currency: string; requestId: string }): Promise<ObservedRefund> {
+    if (i.amountMinor !== undefined && (!Number.isSafeInteger(i.amountMinor) || i.amountMinor <= 0)) {
+      throw new AdapterError("rejected", "refund amount invalid");
+    }
+    const body = i.amountMinor === undefined ? undefined
+      : { amount: { currency_code: i.currency, value: toDecimalString(i.amountMinor, i.currency) } };
+    const res = await this.call("POST", `/v2/payments/captures/${encodeURIComponent(captureId)}/refund`,
+      { requestId: i.requestId, prefer: "return=representation", body: body ?? {} });
+    if (!res.ok) throw failFor(res.status, "PayPal refund");
+    return mapRefund(res.json);
+  }
+
+  async getRefund(refundId: string): Promise<ObservedRefund> {
+    const res = await this.call("GET", `/v2/payments/refunds/${encodeURIComponent(refundId)}`);
+    if (!res.ok) throw failFor(res.status, "PayPal get refund");
+    return mapRefund(res.json);
+  }
+
+  async getCapture(captureId: string): Promise<ObservedCaptureFact> {
+    const res = await this.call("GET", `/v2/payments/captures/${encodeURIComponent(captureId)}`);
+    if (!res.ok) throw failFor(res.status, "PayPal get capture");
+    const id = str(res.json.id);
+    if (!id) throw new AdapterError("unavailable", "PayPal capture has no id");
+    return { captureId: id, status: str(res.json.status) ?? "UNKNOWN", ...moneyOf(res.json.amount) };
+  }
+
+  // The raw event text is spliced in so PayPal sees the exact delivered bytes
+  async verifyWebhook(i: WebhookVerification): Promise<boolean> {
+    const head = JSON.stringify({
+      auth_algo: i.authAlgo, cert_url: i.certUrl, transmission_id: i.transmissionId,
+      transmission_sig: i.transmissionSig, transmission_time: i.transmissionTime, webhook_id: i.webhookId,
+    });
+    const body = `${head.slice(0, -1)},"webhook_event":${i.rawEvent}}`;
+    const token = await this.bearer();
+    const r = await send(`${this.cfg.baseUrl}/v1/notifications/verify-webhook-signature`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body,
+    });
+    if (r.status === 401) this.token = undefined;
+    if (!r.ok) throw failFor(r.status, "PayPal webhook verification");
+    return str(obj(await jsonOf(r, "PayPal webhook verification")).verification_status) === "SUCCESS";
   }
 }
 

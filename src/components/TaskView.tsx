@@ -141,6 +141,8 @@ export default function TaskPage({ taskId }: { taskId: string }) {
             <dt>Item</dt><dd>{view.receipt.title}</dd>
             <dt>SKU</dt><dd>{view.receipt.sku}</dd>
             <dt>Total paid</dt><dd><strong>{formatMoney(view.receipt.totalMinor, view.receipt.currency)}</strong></dd>
+            {!!view.receipt.refundedMinor && (<><dt>Refunded</dt><dd>{formatMoney(view.receipt.refundedMinor, view.receipt.currency)}</dd></>)}
+            {!!view.receipt.refundPendingMinor && (<><dt>Refund pending</dt><dd>{formatMoney(view.receipt.refundPendingMinor, view.receipt.currency)}</dd></>)}
           </dl>
           <p className="muted small">Sandbox payment. Demo shop.</p>
         </section>

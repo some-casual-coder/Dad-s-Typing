@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type ChatMessage, type Proposal } from "@/lib/api";
 import { newId, requirementLabel } from "@/lib/format";
-
-const MAX_BYTES = 4 * 1024 * 1024;
+import PhotoPicker from "./PhotoPicker";
+import { ReadAloud } from "./ReadAloud";
+import { VoiceRecorder } from "./VoiceRecorder";
 
 interface Props {
   taskId: string;
@@ -40,17 +41,6 @@ export default function Chat({ taskId, token, messages, canSend, canConfirm, onC
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
-
-  const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
-
-  function pick(f: File | undefined) {
-    setErr("");
-    if (!f) return;
-    if (!f.type.startsWith("image/")) { setErr("Please choose a photo (image file)."); return; }
-    if (f.size > MAX_BYTES) { setErr("That photo is too large. Please use one under 4 MB."); return; }
-    setFile(f);
-  }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -102,6 +92,7 @@ export default function Chat({ taskId, token, messages, canSend, canConfirm, onC
           <li key={m.id} className={`msg ${m.role}`}>
             <span className="who">{m.role === "assistant" ? "Assistant" : m.author}</span>
             <p>{m.body}{m.hasImage && <span className="muted"> (photo attached)</span>}</p>
+            {m.role === "assistant" && <ReadAloud text={m.body} />}
           </li>
         ))}
       </ol>
@@ -138,23 +129,15 @@ export default function Chat({ taskId, token, messages, canSend, canConfirm, onC
           <label className="field"><span>Your message</span>
             <textarea name="message" value={text} onChange={(e) => setText(e.target.value)} rows={3}
               placeholder="e.g. It must open from the top. Delivery to Nairobi." /></label>
-          {preview && (
-            <div className="preview">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={preview} alt={alt || "Photo you are about to send"} />
-              <label className="field"><span>Describe the photo (alt text)</span>
-                <input name="alt" value={alt} onChange={(e) => setAlt(e.target.value)} placeholder="e.g. grey carrier with a front door" /></label>
-              <button type="button" className="btn secondary" onClick={() => { setFile(null); setAlt(""); }}>Remove photo</button>
+          <div className="stack">
+            <PhotoPicker file={file} alt={alt} disabled={busy} onFile={setFile} onAlt={setAlt} onError={setErr} />
+            <VoiceRecorder taskId={taskId} token={token} disabled={busy}
+              onTranscript={(t) => setText((old) => (old.trim() ? `${old.trim()} ${t}` : t))} />
+            <div className="row actions-row">
+              <button className="btn" type="submit" disabled={busy || (!text.trim() && !file)}>
+                {busy ? "Sending..." : "Send"}
+              </button>
             </div>
-          )}
-          <div className="row input-row">
-            <label className="btn secondary file-btn">
-              Add photo
-              <input type="file" accept="image/*" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />
-            </label>
-            <button className="btn" type="submit" disabled={busy || (!text.trim() && !file)}>
-              {busy ? "Sending..." : "Send"}
-            </button>
           </div>
         </form>
       ) : <p className="muted">Your link does not allow sending messages.</p>}

@@ -14,8 +14,7 @@ function safeEqual(a: string, b: string) {
 }
 
 // Fails closed: no secret, no signature, stale clock or wrong MAC all reject
-export function verifySigned(channel: string, req: Request, body: string, now = Date.now()) {
-  const secret = channelSecret(channel);
+export function verifyHmac(secret: string, req: Request, body: string, now = Date.now()) {
   const ts = req.headers.get("x-dt-timestamp") ?? "";
   const sig = req.headers.get("x-dt-signature") ?? "";
   if (!/^\d{10}$/.test(ts) || !/^[0-9a-f]{64}$/.test(sig)) throw new DomainError("forbidden", "Not allowed");
@@ -23,6 +22,9 @@ export function verifySigned(channel: string, req: Request, body: string, now = 
   const path = new URL(req.url).pathname;
   if (!safeEqual(sig, sign(secret, ts, req.method, path, body))) throw new DomainError("forbidden", "Not allowed");
 }
+
+export const verifySigned = (channel: string, req: Request, body: string, now = Date.now()) =>
+  verifyHmac(channelSecret(channel), req, body, now);
 
 // Read the raw body first: the MAC covers the exact bytes
 export async function readSigned(channel: string, req: Request): Promise<Record<string, unknown>> {

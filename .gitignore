@@ -13,3 +13,4 @@ playwright-report/
 *.zip
 docs/
 *.tsbuildinfo
+.next-*/

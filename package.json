@@ -11,8 +11,10 @@
     "test": "node --env-file=.env.local node_modules/vitest/vitest.mjs run",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "check:providers": "node --env-file=.env.local scripts/provider-check.mjs",
+    "live:stt": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts stt",
     "live:providers": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts providers",
-    "live:merchant": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts discover-merchant"
+    "live:merchant": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts discover-merchant",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "next": "16.4.6",
@@ -21,6 +23,7 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",

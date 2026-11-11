@@ -56,7 +56,7 @@ async function signed(h: unknown, path: string, body: unknown, params: Record<st
 
 let n = 0;
 const msg = (o: Record<string, unknown> = {}) => ({ providerMessageId: `wamid.${Date.now()}.${++n}`, sender: "254700000001", text: "Mum wants a cat carrier", receivedAt: new Date().toISOString(), ...o });
-const IMG = { mime: "image/png", base64: Buffer.from("not-really-a-png").toString("base64") };
+const IMG = { mime: "image/png", base64: readFileSync("tests/fixtures/carrier.png").toString("base64") };
 const IN = "/api/channel/whatsapp/inbound";
 
 beforeEach(async () => {
@@ -124,7 +124,7 @@ describe("inbound", () => {
   });
 
   it("validates the payload", async () => {
-    for (const bad of [{ sender: "abc" }, { providerMessageId: "bad id!" }, { image: { mime: "image/gif", base64: "AAAA" } }, { image: { mime: "image/png", base64: "***" } }, { text: "", image: undefined }, { receivedAt: "nope" }]) {
+    for (const bad of [{ sender: "abc" }, { providerMessageId: "bad id!" }, { image: { mime: "image/gif", base64: "AAAA" } }, { image: { mime: "image/png", base64: "***" } }, { image: { mime: "image/png", base64: Buffer.from("not really a png").toString("base64") } }, { image: { mime: "image/jpeg", base64: readFileSync("tests/fixtures/carrier.png").toString("base64") } }, { text: "", image: undefined }, { receivedAt: "nope" }]) {
       expect((await signed(inbound, IN, msg(bad))).status).toBe(422);
     }
   });
