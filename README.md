@@ -56,6 +56,31 @@ The server refuses to start PayPal unless `PAYPAL_ENV=sandbox`.
 
 Cancelling at PayPal leaves no receipt and the payment can be retried.
 
+## Connectors (any channel)
+
+The engine does not know about WhatsApp, SMS or any other channel. A connector is a small
+transport that posts inbound messages to the engine and sends the replies the engine queues,
+over a signed HTTP bridge (`/api/channel/{channel}/...`).
+
+To add a channel:
+
+1. Add one entry to `src/channel/registry.ts` (sender id format, reply length, images or not).
+2. Set `CHANNEL_<ID>_SECRET` (32+ characters) and `CHANNEL_<ID>_ALLOWED` (sender ids that may
+   use it; empty means nobody) in the environment. Each channel has its own secret.
+3. Write the connector: sign each request with `HMAC-SHA256(secret, ts \n METHOD \n path \n body)`
+   (headers `X-DT-Timestamp`, `X-DT-Signature`), `POST .../inbound`, then `POST .../outbox/claim`
+   and `POST .../outbox/{id}/ack`. An ack of `unknown` means "may have been delivered" and is never resent.
+
+Try any channel without a real connector:
+
+```bash
+node --env-file=.env.local scripts/channel-sim.mjs sms 254700000009 "a cat carrier for Mum"
+```
+
+`connectors/whatsapp` is a WhatsApp connector (Go, Whatsmeow, an unofficial client; see its README
+for the risks and for pairing). The browser chat is the built-in connector. The browser path keeps
+working when any connector is down.
+
 ## Checks
 
 ```bash
