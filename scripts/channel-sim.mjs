@@ -2,12 +2,18 @@
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-const [channel, sender, text, imagePath] = process.argv.slice(2);
+const [channel, sender, text, imagePath] = process.argv.slice(2).filter((a) => a !== "--force");
 if (!channel || !sender) {
   console.error('usage: channel-sim.mjs <channel> <sender> "<text>" [image.png]');
   process.exit(1);
 }
 const base = process.env.APP_BASE_URL ?? "http://localhost:3000";
+const force = process.argv.includes("--force");
+if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(base) && !force) {
+  console.error("refusing to run against a non-local app (it would claim and ack real replies); pass --force to override");
+  process.exit(1);
+}
+const redact = (s) => s.replace(/#k=[A-Za-z0-9_-]+/g, "#k=<token>");
 const env = process.env;
 const secret = env[`CHANNEL_${channel.toUpperCase()}_SECRET`] ?? (channel === "whatsapp" ? env.WHATSAPP_BRIDGE_SECRET : "") ?? "";
 if (secret.length < 32) {
@@ -32,7 +38,7 @@ console.log("inbound:", sent.status, JSON.stringify(sent.json));
 for (let i = 0; i < 30; i++) {
   const { json } = await call(`/api/channel/${channel}/outbox/claim`, { limit: 5 });
   for (const item of json?.items ?? []) {
-    console.log(`reply to ${item.recipient} (attempt ${item.attempt}):\n${item.body}\n`);
+    console.log(`reply to ${item.recipient} (attempt ${item.attempt}):\n${redact(item.body)}\n`);
     await call(`/api/channel/${channel}/outbox/${item.id}/ack`, { state: "sent", providerMessageId: `sim.out.${item.id.slice(0, 8)}` });
     process.exit(0);
   }

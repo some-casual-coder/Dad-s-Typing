@@ -47,6 +47,18 @@ export function channelSecret(id: string, env = process.env): string {
   return s;
 }
 
+// Two channels sharing a secret would let one connector act on the other
+export function assertDistinctSecrets(env = process.env) {
+  const seen = new Map<string, string>();
+  for (const id of channelIds()) {
+    if (!isConfigured(id, env)) continue;
+    const s = read(id, "SECRET", env);
+    const other = seen.get(s);
+    if (other) throw new Error(`channels ${other} and ${id} share a secret`);
+    seen.set(s, id);
+  }
+}
+
 export const isConfigured = (id: string, env = process.env) => read(id, "SECRET", env).length >= 32;
 
 // Empty means nobody is allowed: unknown senders are ignored, never answered

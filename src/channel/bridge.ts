@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 import { DomainError } from "@/domain/errors";
 import { channelSecret, getChannel } from "./registry";
 
@@ -18,15 +18,21 @@ export function verifySigned(channel: string, req: Request, body: string, now = 
   const secret = channelSecret(channel);
   const ts = req.headers.get("x-dt-timestamp") ?? "";
   const sig = req.headers.get("x-dt-signature") ?? "";
-  if (!/^\d{10}$/.test(ts) || !/^[0-9a-f]{64}$/.test(sig)) throw new DomainError("forbidden", "Bad signature");
-  if (Math.abs(now / 1000 - Number(ts)) > MAX_SKEW_S) throw new DomainError("forbidden", "Stale request");
+  if (!/^\d{10}$/.test(ts) || !/^[0-9a-f]{64}$/.test(sig)) throw new DomainError("forbidden", "Not allowed");
+  if (Math.abs(now / 1000 - Number(ts)) > MAX_SKEW_S) throw new DomainError("forbidden", "Not allowed");
   const path = new URL(req.url).pathname;
-  if (!safeEqual(sig, sign(secret, ts, req.method, path, body))) throw new DomainError("forbidden", "Bad signature");
+  if (!safeEqual(sig, sign(secret, ts, req.method, path, body))) throw new DomainError("forbidden", "Not allowed");
 }
 
 // Read the raw body first: the MAC covers the exact bytes
 export async function readSigned(channel: string, req: Request): Promise<Record<string, unknown>> {
-  getChannel(channel);
+  // unknown, unconfigured and badly signed all look the same from outside
+  try {
+    getChannel(channel);
+    channelSecret(channel);
+  } catch {
+    throw new DomainError("forbidden", "Not allowed");
+  }
   const len = Number(req.headers.get("content-length") ?? "0");
   if (len > MAX_BODY) throw new DomainError("invalid", "Body too large");
   const text = await req.text();
@@ -41,9 +47,13 @@ export async function readSigned(channel: string, req: Request): Promise<Record<
   }
 }
 
-// Keyed per channel, so one connector's secret never yields another's tokens
+// The request MAC uses the secret itself (the connector signs with it); every
+// other use gets its own HKDF subkey so purposes cannot be confused
+const subkey = (channel: string, purpose: "grant" | "sender") =>
+  Buffer.from(hkdfSync("sha256", channelSecret(channel), "dt-channel-v1", `${channel}:${purpose}`, 32));
+
 export const deriveChannelToken = (channel: string, grantId: string) =>
-  createHmac("sha256", channelSecret(channel)).update(`grant:${channel}:${grantId}`).digest("base64url");
+  createHmac("sha256", subkey(channel, "grant")).update(grantId).digest("base64url");
 
 export const senderHash = (channel: string, sender: string) =>
-  createHmac("sha256", channelSecret(channel)).update(`sender:${channel}:${sender}`).digest("hex");
+  createHmac("sha256", subkey(channel, "sender")).update(sender).digest("hex");

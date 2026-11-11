@@ -84,12 +84,17 @@ const hits = new Map<string, { n: number; reset: number }>();
 export function rateLimit(key: string, max: number, windowMs = 60_000) {
   const now = Date.now();
   if (hits.size > 5000) for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
-  if (hits.size > 5000) hits.clear();
+  // still full of live keys: drop the oldest tenth rather than every limiter
+  if (hits.size > 5000) for (const k of [...hits.keys()].slice(0, 500)) hits.delete(k);
   const h = hits.get(key);
   if (!h || h.reset < now) return void hits.set(key, { n: 1, reset: now + windowMs });
   if (++h.n > max) throw new HttpError(429, "rate_limited", "Too many requests, slow down");
 }
 
-// x-forwarded-for is spoofable unless a trusted proxy sets it
-export const clientIp = (req: Request) =>
-  process.env.TRUST_PROXY === "1" ? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local" : "local";
+// Count TRUST_PROXY_HOPS proxies from the right: the left side is client-controlled
+export function clientIp(req: Request): string {
+  if (process.env.TRUST_PROXY !== "1") return "local";
+  const parts = (req.headers.get("x-forwarded-for") ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  const hops = Math.max(Number(process.env.TRUST_PROXY_HOPS ?? "1") || 1, 1);
+  return parts[Math.max(parts.length - hops, 0)] || "local";
+}

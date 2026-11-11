@@ -18,6 +18,7 @@ export const POST = handle<{ id: string }>(async (req, { id }) => {
   if (a.status === "captured") return respond("captured", false);
   if (!["created", "approved", "pending"].includes(a.status)) throw new DomainError("not_payable", "This payment attempt is closed");
   if (!a.paypalOrderId) throw new DomainError("conflict", "Payment has not been started");
+  if (!a.current) throw new DomainError("stale", "The choice changed; this payment was not taken");
 
   const payments = getPayments();
   const op = await operationFor(a.id, "capture");

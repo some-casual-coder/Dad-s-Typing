@@ -6,6 +6,16 @@ import { addMessage, getComparison } from "@/domain/tasks";
 
 export const FALLBACK = "I could not read that, please describe it.";
 
+// The model has no reason to send links or contacts; injected ones are removed
+export function scrubModelText(s: string): string {
+  return s
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "")
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "")
+    .replace(/\+?\d[\d\s().-]{6,}\d/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export interface ExchangeInput {
   channel: string; key: string; text?: string; image?: { mime: string; base64: string };
 }
@@ -33,8 +43,8 @@ export async function postExchange(taskId: string, token: string, input: Exchang
     console.error("api_error", "interpret_failed", e instanceof AdapterError ? e.kind : (e as Error)?.name);
   }
   const proposals = (result?.proposedRequirements ?? []).slice(0, 10);
-  const clarification = result?.clarification ?? null;
-  const reply = (result?.reply || FALLBACK).slice(0, 2000);
+  const clarification = result?.clarification ? scrubModelText(result.clarification) || null : null;
+  const reply = (scrubModelText(result?.reply ?? "") || FALLBACK).slice(0, 2000);
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
   return getExchange(taskId, token, input.key, input.channel);
 }

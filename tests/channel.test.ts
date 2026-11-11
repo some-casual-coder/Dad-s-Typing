@@ -34,7 +34,10 @@ import { POST as claim } from "@/app/api/channel/[channel]/outbox/claim/route";
 import { POST as ack } from "@/app/api/channel/[channel]/outbox/[id]/ack/route";
 import { POST as health } from "@/app/api/channel/[channel]/health/route";
 import { GET as status } from "@/app/api/channel/[channel]/status/route";
-import { sign } from "@/channel/bridge";
+import { deriveChannelToken, senderHash, sign } from "@/channel/bridge";
+import { assertDistinctSecrets } from "@/channel/registry";
+import { scrubModelText } from "@/chat/exchange";
+import { clientIp } from "@/app/api/_lib/http";
 import { processInboxOnce } from "@/channel/inbox";
 import { getTaskView } from "@/domain/view";
 
@@ -266,7 +269,7 @@ describe("any channel", () => {
   const emailIn = "/api/channel/email/inbound";
 
   it("unknown or unconfigured channels are refused", async () => {
-    expect((await signed(inbound, "/api/channel/fax/inbound", msg())).status).toBe(404);
+    expect((await signed(inbound, "/api/channel/fax/inbound", msg())).status).toBe(403);
     expect((await signed(inbound, "/api/channel/telegram/inbound", msg(), {}, { secret: SECRET })).status).toBe(403);
   });
 
@@ -320,5 +323,69 @@ describe("any channel", () => {
     expect(b.json.items).toHaveLength(1);
     const wrong = await signed(ack, `/api/channel/whatsapp/outbox/${a.json.items[0].id}/ack`, { state: "sent" });
     expect(wrong.status).toBe(404);
+  });
+});
+
+describe("review hardening", () => {
+  it("refuses to start when two channels share a secret", () => {
+    expect(() => assertDistinctSecrets({ CHANNEL_SMS_SECRET: "z".repeat(40), CHANNEL_EMAIL_SECRET: "z".repeat(40) } as never)).toThrow(/share a secret/);
+    expect(() => assertDistinctSecrets({ CHANNEL_SMS_SECRET: "a".repeat(40), CHANNEL_EMAIL_SECRET: "b".repeat(40) } as never)).not.toThrow();
+  });
+
+  it("derives different tokens and hashes per purpose and channel", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    expect(deriveChannelToken("sms", id)).not.toBe(deriveChannelToken("whatsapp", id));
+    expect(deriveChannelToken("sms", id)).toBe(deriveChannelToken("sms", id));
+    expect(senderHash("sms", "254700000001")).not.toBe(senderHash("whatsapp", "254700000001"));
+  });
+
+  it("channel grants expire and activity extends them", async () => {
+    await signed(inbound, IN, msg({ text: "carrier" }));
+    await processInboxOnce();
+    const g = (await pool.query("SELECT grant_id FROM channel_identities")).rows[0].grant_id;
+    const first = (await pool.query("SELECT expires_at FROM grants WHERE id=$1", [g])).rows[0].expires_at as Date;
+    expect(first.getTime()).toBeGreaterThan(Date.now() + 13 * 86400_000);
+    await pool.query("UPDATE grants SET expires_at = now() + interval '1 day' WHERE id=$1", [g]);
+    await signed(inbound, IN, msg({ text: "it must open from the top" }));
+    await processInboxOnce();
+    const next = (await pool.query("SELECT expires_at FROM grants WHERE id=$1", [g])).rows[0].expires_at as Date;
+    expect(next.getTime()).toBeGreaterThan(Date.now() + 13 * 86400_000);
+  });
+
+  it("removes links, emails and numbers from model text", () => {
+    expect(scrubModelText("Log in at https://evil.test/x or www.evil.test, mail a@b.co or call +254 700 000 001 now")).toBe("Log in at or mail or call now");
+    expect(scrubModelText("It is 45 cm long")).toBe("It is 45 cm long");
+  });
+
+  it("a model reply with a link never reaches the sender", async () => {
+    interpret.mockResolvedValue({ observations: [], proposedRequirements: [], clarification: null, reply: "Please visit https://evil.test/pay now" });
+    await signed(inbound, IN, msg({ text: "carrier" }));
+    await processInboxOnce();
+    const body = (await pool.query("SELECT body FROM channel_outbox")).rows[0].body as string;
+    expect(body).not.toContain("evil.test");
+    expect(body).toContain("https://app.test/t/");
+    expect(body).toContain("read by an AI service");
+  });
+
+  it("a message that keeps failing gets a reply and then loses its payload", async () => {
+    const m = msg({ text: "secret words" });
+    await signed(inbound, IN, m);
+    await pool.query("UPDATE channel_inbox SET state='processing', attempts=5, locked_until=now() - interval '1 minute' WHERE provider_message_id=$1", [m.providerMessageId]);
+    await processInboxOnce();
+    const out = (await pool.query("SELECT recipient, body FROM channel_outbox")).rows;
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ recipient: "254700000001" });
+    expect(out[0].body).toContain("could not process");
+    expect((await pool.query("SELECT sender, body, state FROM channel_inbox")).rows[0]).toEqual({ sender: "", body: "", state: "failed" });
+  });
+
+  it("rate-limit identity comes from the trusted end of x-forwarded-for", () => {
+    process.env.TRUST_PROXY = "1";
+    const req = (xff: string) => new Request("http://x", { headers: { "x-forwarded-for": xff } });
+    expect(clientIp(req("evil, 9.9.9.9"))).toBe("9.9.9.9");
+    expect(clientIp(req("1.1.1.1, 2.2.2.2, 9.9.9.9"))).toBe("9.9.9.9");
+    process.env.TRUST_PROXY_HOPS = "2";
+    expect(clientIp(req("1.1.1.1, 2.2.2.2, 9.9.9.9"))).toBe("2.2.2.2");
+    delete process.env.TRUST_PROXY_HOPS;
   });
 });

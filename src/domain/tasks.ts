@@ -15,6 +15,7 @@ const ROLES: Role[] = ["requester", "helper", "chooser", "payer"];
 export async function createTask(input: {
   title: string; purpose?: string; market?: string; currency?: string; starterRoles?: Role[]; starterLabel?: string;
   deriveToken?: (grantId: string) => string;
+  grantTtlDays?: number;
   inTx?: (c: Tx, ids: { taskId: string; grantId: string }) => Promise<void>;
 }) {
   if (!input.title?.trim()) throw new DomainError("invalid", "Title required");
@@ -27,9 +28,11 @@ export async function createTask(input: {
     ]);
     const grantId = randomUUID();
     const token = input.deriveToken ? input.deriveToken(grantId) : newToken();
-    await c.query(`INSERT INTO grants (id,task_id,token_hash,roles,label,can_delegate) VALUES ($1,$2,$3,$4,$5,true)`, [
-      grantId, taskId, hashToken(token), roles, input.starterLabel ?? "",
-    ]);
+    await c.query(
+      `INSERT INTO grants (id,task_id,token_hash,roles,label,can_delegate,expires_at)
+       VALUES ($1,$2,$3,$4,$5,true, CASE WHEN $6::int IS NULL THEN NULL ELSE now() + make_interval(days => $6::int) END)`,
+      [grantId, taskId, hashToken(token), roles, input.starterLabel ?? "", input.grantTtlDays ?? null],
+    );
     await logEvent(c, taskId, grantId, "task.created", { roles });
     await input.inTx?.(c, { taskId, grantId });
     return { taskId, token };
@@ -166,6 +169,21 @@ export async function getComparison(taskId: string, token: string) {
   });
 }
 
+// A new choice cancels unpaid orders; a payment already being captured blocks it
+async function releasePayment(c: Tx, taskId: string) {
+  const paid = await c.query(`SELECT 1 FROM seller_orders WHERE task_id=$1 AND status='paid'`, [taskId]);
+  if (paid.rowCount) throw new DomainError("conflict", "This task is already paid");
+  const open = await c.query(
+    `SELECT a.id, EXISTS (SELECT 1 FROM payment_operations p WHERE p.attempt_id=a.id AND p.kind='capture' AND p.status IN ('started','unknown','succeeded')) AS capturing
+       FROM payment_attempts a JOIN seller_orders o ON o.id=a.seller_order_id
+      WHERE o.task_id=$1 AND a.status IN ('created','approved','pending') FOR UPDATE OF a`,
+    [taskId],
+  );
+  if (open.rows.some((r) => r.capturing)) throw new DomainError("conflict", "A payment is being checked; try again when it finishes");
+  await c.query(`UPDATE payment_attempts SET status='cancelled', updated_at=now() WHERE id = ANY($1::uuid[])`, [open.rows.map((r) => r.id)]);
+  await c.query(`UPDATE seller_orders SET status='cancelled' WHERE task_id=$1 AND status IN ('awaiting_payer','pending')`, [taskId]);
+}
+
 export async function selectOffer(taskId: string, token: string, input: { offerId: string; expectedVersion: number; reason?: string }, opts: { idempotencyKey: string }) {
   return tx(async (c) => {
     const g = await authorize(c, taskId, token, "choose");
@@ -177,6 +195,7 @@ export async function selectOffer(taskId: string, token: string, input: { offerI
       if (!o) throw new DomainError("not_found", "Offer not found");
       const e = evaluate(await confirmedRequirements(c, taskId), o.attributes);
       if (e.status !== "eligible" || o.availability !== "InStock") throw new DomainError("invalid", "That option does not meet the confirmed requirements");
+      await releasePayment(c, taskId);
       await c.query(`UPDATE selections SET superseded_at=now() WHERE task_id=$1 AND superseded_at IS NULL`, [taskId]);
       const id = randomUUID();
       const snapshot = { offerId: o.id, seller: o.seller, merchantId: o.merchant_id, sku: o.sku, title: o.title, variant: o.variant, route: o.route,

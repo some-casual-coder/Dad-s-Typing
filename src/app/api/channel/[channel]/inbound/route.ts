@@ -4,7 +4,7 @@ import { getChannel } from "@/channel/registry";
 import { handle, json } from "@/app/api/_lib/http";
 
 export const POST = handle<{ channel: string }>(async (req, { channel }) => {
-  const def = getChannel(channel);
-  const status = await enqueueInbound(channel, parseInbound(def, await readSigned(channel, req)));
+  const body = await readSigned(channel, req);
+  const status = await enqueueInbound(channel, parseInbound(getChannel(channel), body));
   return json({ status }, 202);
 });

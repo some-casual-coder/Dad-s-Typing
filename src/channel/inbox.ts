@@ -9,6 +9,9 @@ import { deriveChannelToken, senderHash } from "./bridge";
 import { allowedSenders, channelIds, getChannel, isConfigured, type ChannelDef } from "./registry";
 
 const MAX_ATTEMPTS = 5;
+const GRANT_DAYS = 14;
+const CONSENT = "Photos and messages you send are read by an AI service to help with this task.";
+const SORRY = "Sorry, I could not process that message. Please send it again.";
 const MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_IMAGE_B64 = Math.ceil(4 * 1024 * 1024 * 1.4);
 
@@ -61,6 +64,14 @@ async function purgeOld() {
 
 async function claimInbox(channel: string): Promise<Row | null> {
   return tx(async (c) => {
+    // tell the sender before their number is dropped, so a failure is never silent
+    await c.query(
+      `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key)
+       SELECT gen_random_uuid(), channel, sender, $3, 'inbox-failed:' || id FROM channel_inbox
+        WHERE channel=$2 AND state='processing' AND locked_until < now() AND attempts >= $1 AND sender <> ''
+       ON CONFLICT (dedupe_key) DO NOTHING`,
+      [MAX_ATTEMPTS, channel, SORRY],
+    );
     await c.query(`UPDATE channel_inbox SET state='failed', image_b64=NULL, sender='', body='' WHERE channel=$2 AND state='processing' AND locked_until < now() AND attempts >= $1`, [MAX_ATTEMPTS, channel]);
     const r = await c.query(
       `UPDATE channel_inbox SET state='processing', attempts=attempts+1, locked_until=now()+interval '3 minutes'
@@ -78,6 +89,7 @@ export function composeReply(o: { reply: string; proposals: { key: string; op: s
   if (o.proposals.length) {
     head.push("I understood: " + o.proposals.map((p) => `${p.key.replace(/_/g, " ")} ${p.op} ${p.value}${p.unit ?? ""}`).join("; ") + ". Please confirm on the page.");
   }
+  if (o.fresh) head.push(CONSENT);
   // the link is the point of the reply, so only the words before it are cut
   const room = Math.max(o.maxChars - tail.length - 2, 0);
   const words = head.join("\n\n").slice(0, room).trimEnd();
@@ -93,7 +105,10 @@ async function resolveTask(channel: string, row: Row, hasImage: boolean) {
   if (existing) {
     const token = deriveChannelToken(channel, existing.grant_id);
     const v = await getTaskView(existing.task_id, token).catch(() => null);
-    if (v && v.nextAction !== "paid" && v.nextAction !== "cancelled") return { taskId: existing.task_id as string, token, fresh: false };
+    if (v && v.nextAction !== "paid" && v.nextAction !== "cancelled") {
+      await tx((c) => c.query(`UPDATE grants SET expires_at = now() + make_interval(days => $2) WHERE id=$1 AND revoked_at IS NULL`, [existing.grant_id, GRANT_DAYS]));
+      return { taskId: existing.task_id as string, token, fresh: false };
+    }
   }
   if (row.task_id) {
     // a previous attempt already created this message's task
@@ -102,7 +117,7 @@ async function resolveTask(channel: string, row: Row, hasImage: boolean) {
   }
   const title = ((row.body as string) || `Request from ${getChannel(channel).label}`).replace(/\s+/g, " ").slice(0, 80);
   const made = await createTask({
-    title, starterRoles: ["helper", "payer"], starterLabel: getChannel(channel).label, deriveToken: (id) => deriveChannelToken(channel, id),
+    title, starterRoles: ["helper", "payer"], starterLabel: getChannel(channel).label, grantTtlDays: GRANT_DAYS, deriveToken: (id) => deriveChannelToken(channel, id),
     inTx: async (c, ids) => {
       await c.query(
         `INSERT INTO channel_identities (channel,sender_hash,task_id,grant_id) VALUES ($1,$2,$3,$4)
@@ -128,7 +143,7 @@ async function processRow(channel: string, row: Row) {
       `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (dedupe_key) DO NOTHING`,
       [randomUUID(), channel, row.sender, body, `inbox:${row.id}`],
     );
-    await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, sender='', locked_until=NULL WHERE id=$1`, [row.id]);
+    await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, sender='', body='', locked_until=NULL WHERE id=$1`, [row.id]);
   });
 }
 

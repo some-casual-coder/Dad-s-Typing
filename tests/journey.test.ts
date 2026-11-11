@@ -287,3 +287,51 @@ describe("recovery and stale orders", () => {
     expect((await listOpenAttempts()).some((a) => a.id === att.id)).toBe(false);
   });
 });
+
+describe("a changed choice and payments", () => {
+  async function twoOffers() {
+    const f = await frozenOrder();
+    await recordOffers(f.taskId, [offer("TOP-2", "top")]);
+    const cmp = await getComparison(f.taskId, f.mum);
+    return { ...f, other: cmp.offers.find((o) => o.sku === "TOP-2")!.id, version: cmp.version };
+  }
+
+  it("choosing again cancels an unpaid order and its open attempt", async () => {
+    const f = await twoOffers();
+    const att = await beginAttempt(f.taskId, f.nathan, f.order.id);
+    await selectOffer(f.taskId, f.mum, { offerId: f.other, expectedVersion: f.version }, { idempotencyKey: key() });
+    const row = (await pool.query(`SELECT a.status AS a, o.status AS o FROM payment_attempts a JOIN seller_orders o ON o.id=a.seller_order_id WHERE a.id=$1`, [att.id])).rows[0];
+    expect(row).toEqual({ a: "cancelled", o: "cancelled" });
+  });
+
+  it("choosing again is refused while a capture is in flight or after payment", async () => {
+    const f = await twoOffers();
+    const att = await beginAttempt(f.taskId, f.nathan, f.order.id);
+    await operationFor(att.id, "capture");
+    await expect(selectOffer(f.taskId, f.mum, { offerId: f.other, expectedVersion: f.version }, { idempotencyKey: key() })).rejects.toMatchObject({ code: "conflict" });
+    const pp = key();
+    await recordProviderOrder(att.id, pp);
+    await settleCapture(att.id, { ...completed, paypalOrderId: pp, captureId: `CAP-${pp}` });
+    await expect(selectOffer(f.taskId, f.mum, { offerId: f.other, expectedVersion: f.version }, { idempotencyKey: key() })).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("a late capture for a replaced choice is recorded and the task still shows paid", async () => {
+    const f = await twoOffers();
+    const pp = key();
+    const att = await beginAttempt(f.taskId, f.nathan, f.order.id);
+    await recordProviderOrder(att.id, pp);
+    await selectOffer(f.taskId, f.mum, { offerId: f.other, expectedVersion: f.version }, { idempotencyKey: key() });
+    const r = await settleCapture(att.id, { ...completed, paypalOrderId: pp, captureId: `CAP-${pp}` });
+    expect(r.order).toBe("paid");
+    expect((await pool.query(`SELECT kind FROM payment_exceptions WHERE attempt_id=$1`, [att.id])).rows.map((x) => x.kind)).toContain("superseded_selection");
+    const v = await getTaskView(f.taskId, f.mum);
+    expect(v.nextAction).toBe("paid");
+    expect(v.receipt).toMatchObject({ sku: "TOP-1", totalMinor: 4399 });
+  });
+
+  it("a new attempt is refused once a requirement change made the order stale", async () => {
+    const f = await frozenOrder();
+    await setRequirement(f.taskId, f.mum, { key: "opening", op: "neq", value: "top" }, { idempotencyKey: key() });
+    await expect(beginAttempt(f.taskId, f.nathan, f.order.id)).rejects.toMatchObject({ code: "stale" });
+  });
+});

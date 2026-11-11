@@ -40,8 +40,8 @@ export async function beginAttempt(taskId: string, token: string, orderId: strin
     if (o.status === "paid") throw new DomainError("conflict", "Already paid");
     const open = (await c.query(`SELECT * FROM payment_attempts WHERE seller_order_id=$1 AND status IN ${OPEN}`, [orderId])).rows[0];
     if (open) return attemptView(c, open, true);
-    const live = (await c.query(`SELECT s.superseded_at, t.cancelled_at FROM selections s JOIN tasks t ON t.id=s.task_id WHERE s.id=$1`, [o.selection_id])).rows[0];
-    if (!live || live.superseded_at || live.cancelled_at) throw new DomainError("stale", "The choice changed; it needs a fresh review");
+    const live = (await c.query(`SELECT s.superseded_at, t.cancelled_at, s.task_version <> t.version AS changed FROM selections s JOIN tasks t ON t.id=s.task_id WHERE s.id=$1`, [o.selection_id])).rows[0];
+    if (!live || live.superseded_at || live.cancelled_at || live.changed) throw new DomainError("stale", "The choice changed; it needs a fresh review");
     const a = (await c.query(
       `INSERT INTO payment_attempts (id,seller_order_id,created_by) VALUES ($1,$2,$3) RETURNING *`,
       [randomUUID(), orderId, g.id],
@@ -125,7 +125,14 @@ export async function settleCapture(attemptId: string, obs: ObservedCapture) {
 
     if (status === "COMPLETED") {
       const ok = obs.captureId && obs.amountMinor === o.total_minor && obs.currency === o.currency && obs.payeeMerchantId === o.merchant_id;
-      return ok ? set("captured", "paid") : flag("capture_mismatch");
+      if (!ok) return flag("capture_mismatch");
+      const sel = (await c.query(`SELECT superseded_at FROM selections WHERE id=$1`, [o.selection_id])).rows[0];
+      if (sel?.superseded_at) {
+        // the money moved for an order the task has since moved past: record it for review
+        await c.query(`INSERT INTO payment_exceptions (id,task_id,attempt_id,kind,detail) VALUES ($1,$2,$3,'superseded_selection',$4)`,
+          [randomUUID(), o.task_id, attemptId, JSON.stringify({ paypalOrderId: obs.paypalOrderId })]);
+      }
+      return set("captured", "paid");
     }
     if (status === "PENDING") return set("pending", "pending");
     if (status === "CANCELLED") return set("cancelled", "awaiting_payer");

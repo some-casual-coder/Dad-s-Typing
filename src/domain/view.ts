@@ -10,7 +10,9 @@ export async function getTaskView(taskId: string, token: string) {
     const g = await authorize(c, taskId, token, "view");
     const t = (await c.query(`SELECT * FROM tasks WHERE id=$1`, [taskId])).rows[0];
     const sel = (await c.query(`SELECT * FROM selections WHERE task_id=$1 AND superseded_at IS NULL`, [taskId])).rows[0];
-    const ord = sel ? (await c.query(`SELECT * FROM seller_orders WHERE selection_id=$1`, [sel.id])).rows[0] : undefined;
+    // a paid order is the truth even if the choice moved on afterwards
+    const paid = (await c.query(`SELECT * FROM seller_orders WHERE task_id=$1 AND status='paid' LIMIT 1`, [taskId])).rows[0];
+    const ord = paid ?? (sel ? (await c.query(`SELECT * FROM seller_orders WHERE selection_id=$1`, [sel.id])).rows[0] : undefined);
     const reqs = (await c.query(`SELECT id,key,op,value,unit,essential,status FROM requirements WHERE task_id=$1 AND superseded_at IS NULL ORDER BY created_at`, [taskId])).rows;
     const stale = !!sel && sel.task_version !== t.version && !ord;
 
