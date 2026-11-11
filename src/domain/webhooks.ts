@@ -61,8 +61,22 @@ async function apply(payments: Payments, f: WebhookFacts): Promise<WebhookState>
     case "PAYMENT.CAPTURE.REFUNDED": {
       const a = await find("capture_id", f.resourceId);
       if (!a) return "ignored";
-      for (const r of await refundsForAttempt(a.id)) {
+      const mine = await refundsForAttempt(a.id);
+      for (const r of mine) {
         if (["requested", "pending"].includes(r.status) && r.providerRefundId) await settleRefund(r.id, await payments.getRefund(r.providerRefundId));
+      }
+      // a refund we never asked for (for example from PayPal's dashboard) needs a person
+      if (mine.length === 0) {
+        const cap = await payments.getCapture(f.resourceId!);
+        if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(cap.status.toUpperCase())) {
+          await tx(async (c) => {
+            const open = await c.query(`SELECT 1 FROM payment_exceptions WHERE attempt_id=$1 AND kind='external_refund' AND resolved_at IS NULL`, [a.id]);
+            if (open.rowCount) return;
+            const o = (await c.query(`SELECT task_id FROM seller_orders WHERE id=$1`, [a.seller_order_id])).rows[0];
+            await c.query(`INSERT INTO payment_exceptions (id,task_id,attempt_id,kind,detail) VALUES ($1,$2,$3,'external_refund',$4)`,
+              [randomUUID(), o.task_id, a.id, JSON.stringify({ captureStatus: cap.status })]);
+          });
+        }
       }
       return "processed";
     }

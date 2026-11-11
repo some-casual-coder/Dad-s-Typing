@@ -4,15 +4,19 @@ import { DomainError } from "@/domain/errors";
 import { getExchange, recordAssistantMessage } from "@/domain/messages";
 import { addMessage, getComparison } from "@/domain/tasks";
 import { seedExternalOffers } from "@/catalog/demo";
-import { hasExternalOffers } from "@/domain/offers";
+import { claimExternalSearch } from "@/domain/offers";
 
 export const FALLBACK = "I could not read that, please describe it.";
 
 // The model has no reason to send links or contacts; injected ones are removed
 export function scrubModelText(s: string): string {
   return s
+    .replace(/\[\.\]|\(\.\)/g, ".")
+    .replace(/\s*\bdot\b\s*(?=(?:com|net|org|io|co|ke|ly|me|app|dev|xyz|info|biz|us|uk|to|gl|gg|ai)\b)/gi, ".")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "")
     .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, "")
+    .replace(/\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|io|co|ke|ly|me|app|dev|xyz|info|biz|us|uk|to|gl|gg|ai)\b(?:\/\S*)?/gi, "")
+    .replace(/(^|\s)@\w{2,}/g, "$1")
     .replace(/\+?\d[\d\s().-]{6,}\d/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -50,6 +54,6 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
   const item = result?.item;
   // the next poll picks the offers up; the reply never waits on the catalogue
-  if (item) void hasExternalOffers(taskId).then((has) => (has ? undefined : seedExternalOffers(taskId, item))).catch(() => console.error("channel_error", "seed_external"));
+  if (item) void claimExternalSearch(taskId).then((first) => (first ? seedExternalOffers(taskId, item) : undefined)).catch(() => console.error("channel_error", "seed_external"));
   return getExchange(taskId, token, input.key, input.channel);
 }

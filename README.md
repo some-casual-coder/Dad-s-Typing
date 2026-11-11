@@ -12,12 +12,13 @@ tied to the same task.
 | Part | State |
 |---|---|
 | Checkout | Real PayPal **Sandbox** order, approved by a sandbox buyer and captured by the server. No real money moves. |
-| AI | Real model calls (Gemini through Google or OpenRouter) that propose requirements. The person confirms them; the model cannot choose, pay or change roles. |
+| AI | Real model calls (OpenRouter by default, Gemini through Google also supported) that read text and photos and propose requirements. The person confirms them; the model cannot choose, pay or change roles. |
 | Offers | A clearly labelled **demo seller** ("Whisker & Co (demo)") is the only payable seller. Channel3 results (US/GB) appear as external "View at retailer" links and are never payable here. |
-| Chat | A browser simulation. It is **not** WhatsApp. WhatsApp is a separate later adapter. |
+| Chat | A browser simulation. It is **not** WhatsApp. Text, photo upload and push-to-talk voice all feed the same engine. |
+| Connectors | The engine is channel-agnostic. A WhatsApp connector (Go, Whatsmeow, an unofficial client) is in `connectors/whatsapp`; it has been tested against the app with a fake transport only, not against real WhatsApp. SMS and others plug in the same way. |
 | Refunds | Operator-only, sandbox. There is no public refund control and no merchant UI: a signed local command (`scripts/operator-refund.mjs`, needs `OPERATOR_SECRET`) issues them. Buyers see refunded and pending amounts on the receipt, separate from the payment. |
 | Webhook | `POST /api/webhooks/paypal` is off unless `PAYPAL_WEBHOOK_ID` is set and a reachable HTTPS URL is registered on the sandbox app. Without it the app reconciles payments and refunds by polling PayPal. |
-| Not built yet | WhatsApp (and whatever else is listed as pending above). |
+| Not verified | A real phone gallery/camera pick, a real microphone on a phone, Kenyan-accented or Kiswahili speech, a delivered PayPal webhook, and real WhatsApp. |
 
 ## Run it locally
 
@@ -45,16 +46,21 @@ Environment variables (names only; see `.env.example`):
 
 The server refuses to start PayPal unless `PAYPAL_ENV=sandbox`.
 
-## Try the journey
+## Try the journey (judge path)
 
-1. Open `/`, enter a request, and choose **Start for Mum** (you help and pay).
-2. **Send to Mum** makes a private link. Open it in a different browser profile.
-3. As Mum, say something like "it must open from the top and be at least 45 cm long".
-   Confirm the proposed requirements; the shortlist changes.
-4. Mum chooses an option. You (the payer) review the exact item and total, then
+1. Open `/`. Choose **Upload photo** and pick a photo of a cat carrier. No photo handy? Use
+   **Download a sample photo** on the same screen (a synthetic drawing). Optionally add a note such
+   as "For Mum. It must open from the top and be at least 45 cm long", then **Start with this photo**.
+   You can also type a request and choose **Start for Mum**, or speak it with **Speak**.
+2. The assistant reads the photo and note and proposes requirements, each with the words it relied on.
+   Nothing is applied until a person confirms it.
+3. Choose **Send to Mum** and open the link in a **different browser profile** (a private window shares
+   no sign-in). As Mum, confirm the requirements: the shortlist changes, mismatches move to
+   "Doesn't match", and unverified external offers stay marked **Unverified**.
+4. Mum chooses an option. As the payer, review the exact item, seller and total, then
    **Pay with PayPal (sandbox)** and sign in with a PayPal **Personal sandbox** buyer
    (create one under Testing Tools > Sandbox Accounts in the PayPal developer dashboard).
-5. The server captures and verifies the payment; both views show the receipt.
+5. The server captures and verifies the payment; both views show the same receipt.
 
 Cancelling at PayPal leaves no receipt and the payment can be retried.
 

@@ -2,16 +2,17 @@ import { getPayments } from "@/adapters";
 import { AdapterError } from "@/adapters/types";
 import { DomainError } from "@/domain/errors";
 import { extractFacts, processEvent, recordEvent } from "@/domain/webhooks";
-import { handle, HttpError, json } from "../../_lib/http";
+import { clientIp, handle, HttpError, json, rateLimit } from "../../_lib/http";
 
 const MAX = 64 * 1024;
 const H = (req: Request, n: string) => req.headers.get(n) ?? "";
-const PAYPAL_CERT = /^https:\/\/[a-z0-9.-]+\.paypal\.com\//;
+const PAYPAL_CERT = /^https:\/\/([a-z0-9-]+\.)*sandbox\.paypal\.com\//;
 
 // Off unless PAYPAL_WEBHOOK_ID is set; PayPal verifies the signature, not us
 export const POST = handle(async (req) => {
   const webhookId = process.env.PAYPAL_WEBHOOK_ID ?? "";
   if (!webhookId) throw new HttpError(404, "not_found", "Not found");
+  rateLimit(`wh:${clientIp(req)}`, 120);
   if (!/^application\/json\b/i.test(H(req, "content-type"))) throw new HttpError(415, "unsupported", "Unsupported");
   if (Number(H(req, "content-length") || "0") > MAX) throw new HttpError(413, "too_large", "Too large");
   const raw = await req.text();

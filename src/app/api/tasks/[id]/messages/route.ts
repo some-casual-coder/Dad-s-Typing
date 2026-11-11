@@ -2,7 +2,7 @@ import { postExchange } from "@/chat/exchange";
 import { MAX_IMAGE_BYTES as MAX_IMAGE, validateImage } from "@/chat/image";
 import { resolveGrant } from "@/domain/access";
 import { listMessages, pendingProposals } from "@/domain/messages";
-import { bearer, handle, invalid, json, rateLimit, readJson, str, uuid } from "../../../_lib/http";
+import { bearer, clientIp, dailyCap, handle, invalid, json, rateLimit, readJson, str, uuid } from "../../../_lib/http";
 
 export const GET = handle<{ id: string }>(async (req, { id }) =>
   json({ messages: await listMessages(uuid(id), bearer(req)), proposals: await pendingProposals(uuid(id), bearer(req)) }));
@@ -12,6 +12,8 @@ export const POST = handle<{ id: string }>(async (req, { id }) => {
   const taskId = uuid(id);
   const grant = await resolveGrant(taskId, token, "message");
   rateLimit(`msg:${grant.id}`, 30);
+  rateLimit(`msgip:${clientIp(req)}`, 90);
+  dailyCap("ai", Number(process.env.AI_DAILY_MAX ?? "3000"));
   const b = await readJson(req, Math.ceil(MAX_IMAGE * 1.4) + 10_000);
   const clientMessageId = str(b, "clientMessageId", { max: 100, min: 1 })!;
   const key = `${grant.id}:${clientMessageId}`;

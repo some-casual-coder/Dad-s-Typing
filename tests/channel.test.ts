@@ -37,7 +37,7 @@ import { GET as status } from "@/app/api/channel/[channel]/status/route";
 import { deriveChannelToken, senderHash, sign } from "@/channel/bridge";
 import { assertDistinctSecrets } from "@/channel/registry";
 import { scrubModelText } from "@/chat/exchange";
-import { clientIp } from "@/app/api/_lib/http";
+import { clientIp, dailyCap } from "@/app/api/_lib/http";
 import { processInboxOnce } from "@/channel/inbox";
 import { getTaskView } from "@/domain/view";
 
@@ -114,10 +114,10 @@ describe("inbound", () => {
 
   it("accepts a business-scoped WhatsApp id when it is allowlisted", async () => {
     const keep = process.env.WHATSAPP_ALLOWED_SENDERS;
-    process.env.WHATSAPP_ALLOWED_SENDERS = "KE.13491208655302741918";
+    process.env.WHATSAPP_ALLOWED_SENDERS = "KE.00000000000000000001";
     try {
-      expect((await signed(inbound, IN, msg({ sender: "KE.13491208655302741918" }))).json.status).toBe("accepted");
-      expect((await signed(inbound, IN, msg({ sender: "KE.99999999999999999999" }))).json.status).toBe("ignored");
+      expect((await signed(inbound, IN, msg({ sender: "KE.00000000000000000001" }))).json.status).toBe("accepted");
+      expect((await signed(inbound, IN, msg({ sender: "KE.00000000000000000002" }))).json.status).toBe("ignored");
     } finally {
       process.env.WHATSAPP_ALLOWED_SENDERS = keep;
     }
@@ -387,5 +387,19 @@ describe("review hardening", () => {
     process.env.TRUST_PROXY_HOPS = "2";
     expect(clientIp(req("1.1.1.1, 2.2.2.2, 9.9.9.9"))).toBe("2.2.2.2");
     delete process.env.TRUST_PROXY_HOPS;
+  });
+});
+
+describe("scrub and caps", () => {
+  it("also removes bare domains, obfuscated links and handles", () => {
+    for (const t of ["visit bit.ly/x now", "go to evil[.]com", "see evil dot com", "message @helpdesk", "try t.me/abc", "mail a@b.co today"]) {
+      expect(scrubModelText(t)).not.toMatch(/bit\.ly|evil|@|t\.me|b\.co/);
+    }
+    expect(scrubModelText("a polka dot bag, e.g. 45.5 cm")).toBe("a polka dot bag, e.g. 45.5 cm");
+  });
+
+  it("a daily cap stops further calls with a clear 429", () => {
+    dailyCap("cap-test", 2); dailyCap("cap-test", 2);
+    expect(() => dailyCap("cap-test", 2)).toThrow(/daily limit/);
   });
 });

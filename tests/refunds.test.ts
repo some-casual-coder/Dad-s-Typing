@@ -349,3 +349,53 @@ describe("webhook", () => {
     expect((await recordEvent("sandbox", f)).done).toBe(true);
   });
 });
+
+describe("review follow-ups", () => {
+  const hdr = { "content-type": "application/json", "paypal-transmission-id": "tid", "paypal-transmission-time": "2026-11-11T10:00:00Z", "paypal-transmission-sig": "sig", "paypal-cert-url": "https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1", "paypal-auth-algo": "SHA256withRSA" };
+  const post = (event: object) => webhookRoute(new Request("http://localhost/api/webhooks/paypal", { method: "POST", body: JSON.stringify(event), headers: hdr }));
+
+  it("a full retry cannot match a partial refund made with the same key", async () => {
+    const s = await captured();
+    const p = mk(); p.refundCapture.mockResolvedValue(ok("RF1", 1000));
+    const k = key();
+    await operatorRefund(as(p), op(s.cap, 1000, k));
+    await expect(operatorRefund(as(p), op(s.cap, "full", k))).rejects.toMatchObject({ code: "idempotency_mismatch" });
+    expect((await operatorRefund(as(p), op(s.cap, 1000, k))).amountMinor).toBe(1000);
+  });
+
+  it("a refund PayPal made on its own is flagged once for a person", async () => {
+    const s = await captured();
+    const p = mk(); gate.payments = p; p.verifyWebhook.mockResolvedValue(true);
+    p.getCapture.mockResolvedValue({ captureId: s.cap, status: "PARTIALLY_REFUNDED" });
+    await post({ id: `WH-${randomUUID()}`, event_type: "PAYMENT.CAPTURE.REFUNDED", resource: { id: s.cap } });
+    await post({ id: `WH-${randomUUID()}`, event_type: "PAYMENT.CAPTURE.REFUNDED", resource: { id: s.cap } });
+    const n = await pool.query(`SELECT count(*)::int AS n FROM payment_exceptions WHERE attempt_id=$1 AND kind='external_refund'`, [s.attemptId]);
+    expect(n.rows[0].n).toBe(1);
+  });
+
+  it("the operator route stays closed in production unless enabled, and never shares a connector secret", async () => {
+    const s = await captured();
+    const p = mk(); gate.payments = p; p.refundCapture.mockResolvedValue(ok("RO1", 500));
+    const send = (body: object) => {
+      const text = JSON.stringify(body);
+      const ts = String(Math.floor(Date.now() / 1000));
+      const sig = sign(process.env.OPERATOR_SECRET!, ts, "POST", "/api/operator/refund", text);
+      return operatorRoute(new Request("http://localhost/api/operator/refund", { method: "POST", body: text, headers: { "x-dt-timestamp": ts, "x-dt-signature": sig } }));
+    };
+    const body = () => ({ operator: "ops", captureId: s.cap, amountMinor: 500, operationKey: key() });
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await send(body())).status).toBe(403);
+    vi.stubEnv("OPERATOR_ENABLED", "1");
+    expect((await send(body())).status).toBe(200);
+    vi.stubEnv("CHANNEL_SMS_SECRET", process.env.OPERATOR_SECRET!);
+    expect((await send(body())).status).toBe(403);
+    vi.unstubAllEnvs();
+  });
+
+  it("the webhook only trusts sandbox certificate hosts", async () => {
+    const p = mk(); gate.payments = p; p.verifyWebhook.mockResolvedValue(true);
+    const live = new Request("http://localhost/api/webhooks/paypal", { method: "POST", body: "{}", headers: { ...hdr, "paypal-cert-url": "https://api.paypal.com/v1/notifications/certs/CERT-1" } });
+    expect((await webhookRoute(live)).status).not.toBe(200);
+    expect(p.verifyWebhook).not.toHaveBeenCalled();
+  });
+});

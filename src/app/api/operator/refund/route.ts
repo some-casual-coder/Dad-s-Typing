@@ -1,6 +1,7 @@
 import { getPayments } from "@/adapters";
 import { AdapterError } from "@/adapters/types";
 import { MAX_BODY, verifyHmac } from "@/channel/bridge";
+import { channelIds, channelSecret, isConfigured } from "@/channel/registry";
 import { DomainError } from "@/domain/errors";
 import { operatorRefund } from "@/domain/operator";
 import { handle, invalid, json, readJson, str } from "../../_lib/http";
@@ -11,6 +12,9 @@ const last4 = (s: string | null) => (s ? s.slice(-4) : null);
 export const POST = handle(async (req) => {
   const secret = process.env.OPERATOR_SECRET ?? "";
   if (secret.length < 32) throw new DomainError("forbidden", "Not allowed");
+  // never on by accident in production, and never sharing a connector's secret
+  if (process.env.NODE_ENV === "production" && process.env.OPERATOR_ENABLED !== "1") throw new DomainError("forbidden", "Not allowed");
+  if (channelIds().some((id) => isConfigured(id) && channelSecret(id) === secret)) throw new DomainError("forbidden", "Not allowed");
   if (Number(req.headers.get("content-length") ?? "0") > 2_000) throw new DomainError("forbidden", "Not allowed");
   const text = await req.text();
   if (text.length > 2_000 || text.length > MAX_BODY) throw new DomainError("forbidden", "Not allowed");

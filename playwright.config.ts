@@ -12,7 +12,7 @@ export default defineConfig({
   workers: 1,
   use: { baseURL: `http://localhost:${PORT}`, channel: "chrome", trace: "off" },
   webServer: {
-    command: `next build && next start -p ${PORT}`,
+    command: `node scripts/migrate.mjs && next build && next start -p ${PORT}`,
     url: `http://localhost:${PORT}/api/health`,
     timeout: 300_000,
     reuseExistingServer: false,

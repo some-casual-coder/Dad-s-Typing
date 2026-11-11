@@ -98,6 +98,6 @@ test("composer: remove, replace, same-file reselect, typed fallback, keyboard", 
 
   await page.getByRole("button", { name: "Remove photo" }).click();
   await page.getByLabel("Your message").fill("It must open from the top");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByRole("list", { name: "Messages" }).locator("li.assistant p")).toBeVisible({ timeout: 60_000 });
 });

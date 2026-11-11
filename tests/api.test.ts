@@ -299,12 +299,15 @@ describe("proposals, item search and ranking", () => {
   });
 
   it("the item the AI names seeds external offers once, without delaying the reply", async () => {
-    const s = await setup();
     seedExternal.mockReset().mockImplementation(async () => {});
+    const t = await call(createTask, "POST", "/api/tasks", null, { title: "Photo request", starterRoles: ["requester", "chooser"], seedExternal: false });
+    const p = { id: t.json.taskId as string };
     interpret.mockResolvedValue({ observations: [], proposedRequirements: [], clarification: null, reply: "ok", item: "cat carrier" });
-    await call(postMsg, "POST", "", s.mum, { clientMessageId: "i1", text: "a carrier like this" }, s.p);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(seedExternal).toHaveBeenCalledWith(s.id, "cat carrier");
+    await call(postMsg, "POST", "", t.json.token, { clientMessageId: "i1", text: "a carrier like this" }, p);
+    await call(postMsg, "POST", "", t.json.token, { clientMessageId: "i2", text: "another message" }, p);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(seedExternal).toHaveBeenCalledTimes(1);
+    expect(seedExternal).toHaveBeenCalledWith(p.id, "cat carrier");
     seedExternal.mockImplementation(async () => { throw new Error("channel3 down"); });
   });
 

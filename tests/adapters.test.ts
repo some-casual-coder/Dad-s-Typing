@@ -207,3 +207,13 @@ describe("approval url", () => {
     }
   });
 });
+
+describe("refund error classification", () => {
+  const pay = () => new PayPalPayments(cfg);
+  it("only a plain refusal is definitive; 408, 409 and 422 stay unknown", async () => {
+    for (const [code, kind] of [[400, "rejected"], [403, "rejected"], [404, "rejected"], [408, "unavailable"], [409, "unavailable"], [422, "unavailable"], [500, "unavailable"]] as const) {
+      stub(token(), json({ name: "X" }, code));
+      await expect(pay().refundCapture("CAP123456", { amountMinor: 100, currency: "USD", requestId: "r" })).rejects.toMatchObject({ kind });
+    }
+  });
+});

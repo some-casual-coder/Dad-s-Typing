@@ -59,7 +59,7 @@ export async function requestRefund(req: RefundRequest): Promise<{ refund: Refun
     const prior = (await c.query(`SELECT * FROM refunds WHERE attempt_id=$1 AND operator_key=$2`, [a.id, req.operationKey])).rows[0];
     if (prior) {
       // "full" is only comparable to the amount it resolved to
-      const same = req.amountMinor === "full" || prior.amount_minor === req.amountMinor;
+      const same = req.amountMinor === "full" ? prior.requested_full === true : prior.requested_full === false && prior.amount_minor === req.amountMinor;
       if (!same || prior.initiated_by !== req.operator) throw new DomainError("idempotency_mismatch", "operationKey was used for a different refund");
       return { refund: refundView(prior), created: false };
     }
@@ -70,9 +70,9 @@ export async function requestRefund(req: RefundRequest): Promise<{ refund: Refun
 
     const empty = want === bal.capturedMinor && bal.completedMinor + bal.reservedMinor === 0;
     const row = (await c.query(
-      `INSERT INTO refunds (id,attempt_id,seller_order_id,capture_id,amount_minor,currency,reason,initiated_by,operator_key,request_id,empty_body)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [randomUUID(), a.id, a.order_id, req.captureId, want, bal.currency, req.reason ?? null, req.operator, req.operationKey, randomUUID(), empty],
+      `INSERT INTO refunds (id,attempt_id,seller_order_id,capture_id,amount_minor,currency,reason,initiated_by,operator_key,request_id,empty_body,requested_full)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [randomUUID(), a.id, a.order_id, req.captureId, want, bal.currency, req.reason ?? null, req.operator, req.operationKey, randomUUID(), empty, req.amountMinor === "full"],
     )).rows[0];
     await logEvent(c, a.task_id, null, "refund.requested", { refundId: row.id, amountMinor: want });
     return { refund: refundView(row), created: true };

@@ -130,7 +130,11 @@ export class PayPalPayments implements Payments {
       : { amount: { currency_code: i.currency, value: toDecimalString(i.amountMinor, i.currency) } };
     const res = await this.call("POST", `/v2/payments/captures/${encodeURIComponent(captureId)}/refund`,
       { requestId: i.requestId, prefer: "return=representation", body: body ?? {} });
-    if (!res.ok) throw failFor(res.status, "PayPal refund");
+    // only a plain refusal is definitive; 408/409/422 may still be processed
+    if (!res.ok) {
+      if ([400, 403, 404].includes(res.status)) throw failFor(res.status, "PayPal refund");
+      throw new AdapterError("unavailable", `PayPal refund returned ${res.status}`);
+    }
     return mapRefund(res.json);
   }
 

@@ -98,3 +98,12 @@ export function clientIp(req: Request): string {
   const hops = Math.max(Number(process.env.TRUST_PROXY_HOPS ?? "1") || 1, 1);
   return parts[Math.max(parts.length - hops, 0)] || "local";
 }
+
+// Demo spend guard: a per-day ceiling per feature, reset at UTC midnight
+const day = new Map<string, { n: number; d: string }>();
+export function dailyCap(key: string, max: number) {
+  const d = new Date().toISOString().slice(0, 10);
+  const h = day.get(key);
+  if (!h || h.d !== d) return void day.set(key, { n: 1, d });
+  if (++h.n > max) throw new HttpError(429, "daily_limit", "The demo has reached its daily limit for this feature. Please try again tomorrow.");
+}

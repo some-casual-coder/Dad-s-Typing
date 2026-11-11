@@ -2,13 +2,15 @@ import { getTranscriber } from "@/adapters";
 import { AdapterError } from "@/adapters/types";
 import { resolveGrant } from "@/domain/access";
 import { baseMime, CONTAINERS, sniffFormat, VOICE_MAX_BYTES, VOICE_MULTIPART_OVERHEAD } from "@/lib/voice";
-import { bearer, handle, HttpError, invalid, json, rateLimit, uuid } from "../../../_lib/http";
+import { bearer, clientIp, dailyCap, handle, HttpError, invalid, json, rateLimit, uuid } from "../../../_lib/http";
 
 // Returns text only: a transcript never triggers a send, payment or action
 export const POST = handle<{ id: string }>(async (req, { id }) => {
   const token = bearer(req);
   const grant = await resolveGrant(uuid(id), token, "message");
   rateLimit(`stt:${grant.id}`, 10);
+  rateLimit(`sttip:${clientIp(req)}`, 40);
+  dailyCap("stt", Number(process.env.STT_DAILY_MAX ?? "500"));
   const len = Number(req.headers.get("content-length") ?? NaN);
   if (!Number.isFinite(len)) throw new HttpError(411, "length_required", "Recording size is required");
   if (len > VOICE_MAX_BYTES + VOICE_MULTIPART_OVERHEAD) throw new HttpError(413, "too_large", "Recording is too long");
