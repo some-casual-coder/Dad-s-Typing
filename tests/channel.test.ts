@@ -4,8 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { pool } from "@/domain/db";
 
 const SECRET = "s".repeat(40);
+const SMS_SECRET = "m".repeat(40);
+const EMAIL_SECRET = "e".repeat(40);
 process.env.WHATSAPP_BRIDGE_SECRET = SECRET;
 process.env.WHATSAPP_ALLOWED_SENDERS = "254700000001,254700000002";
+process.env.CHANNEL_SMS_SECRET = SMS_SECRET;
+process.env.CHANNEL_SMS_ALLOWED = "254700000001";
+process.env.CHANNEL_EMAIL_SECRET = EMAIL_SECRET;
+process.env.CHANNEL_EMAIL_ALLOWED = "mum@example.com";
+const SECRETS: Record<string, string> = { whatsapp: SECRET, sms: SMS_SECRET, email: EMAIL_SECRET };
 process.env.APP_BASE_URL = "https://app.test";
 
 const interpret = vi.fn();
@@ -22,11 +29,11 @@ vi.mock("@/catalog/demo", async () => ({
   seedExternalOffers: async () => {},
 }));
 
-import { POST as inbound } from "@/app/api/channel/whatsapp/inbound/route";
-import { POST as claim } from "@/app/api/channel/whatsapp/outbox/claim/route";
-import { POST as ack } from "@/app/api/channel/whatsapp/outbox/[id]/ack/route";
-import { POST as health } from "@/app/api/channel/whatsapp/health/route";
-import { GET as status } from "@/app/api/channel/whatsapp/status/route";
+import { POST as inbound } from "@/app/api/channel/[channel]/inbound/route";
+import { POST as claim } from "@/app/api/channel/[channel]/outbox/claim/route";
+import { POST as ack } from "@/app/api/channel/[channel]/outbox/[id]/ack/route";
+import { POST as health } from "@/app/api/channel/[channel]/health/route";
+import { GET as status } from "@/app/api/channel/[channel]/status/route";
 import { sign } from "@/channel/bridge";
 import { processInboxOnce } from "@/channel/inbox";
 import { getTaskView } from "@/domain/view";
@@ -35,7 +42,9 @@ type H = (req: Request, ctx?: never) => Promise<Response>;
 async function signed(h: unknown, path: string, body: unknown, params: Record<string, string> = {}, over: { ts?: string; secret?: string; method?: string; tamper?: boolean } = {}) {
   const text = JSON.stringify(body);
   const ts = over.ts ?? String(Math.floor(Date.now() / 1000));
-  const sig = sign(over.secret ?? SECRET, ts, over.method ?? "POST", path, text);
+  const channel = /^\/api\/channel\/([^/]+)\//.exec(path)![1];
+  params = { channel, ...params };
+  const sig = sign(over.secret ?? SECRETS[channel] ?? SECRET, ts, over.method ?? "POST", path, text);
   const req = new Request(`http://localhost${path}`, { method: "POST", body: over.tamper ? text + " " : text, headers: { "x-dt-timestamp": ts, "x-dt-signature": sig, "content-type": "application/json" } });
   const res = await (h as H)(req, { params: Promise.resolve(params) } as never);
   const t = await res.text();
@@ -57,7 +66,7 @@ const count = async (sql: string, args: unknown[] = []) => (await pool.query(sql
 describe("signatures", () => {
   it("rejects missing, wrong, stale, tampered and wrong-path requests", async () => {
     const body = msg({ image: IMG });
-    const bare = await (inbound as H)(new Request(`http://localhost${IN}`, { method: "POST", body: JSON.stringify(body) }));
+    const bare = await (inbound as H)(new Request(`http://localhost${IN}`, { method: "POST", body: JSON.stringify(body) }), { params: Promise.resolve({ channel: "whatsapp" }) } as never);
     expect(bare.status).toBe(403);
     expect((await signed(inbound, IN, body, {}, { secret: "x".repeat(40) })).status).toBe(403);
     expect((await signed(inbound, IN, body, {}, { ts: String(Math.floor(Date.now() / 1000) - 1000) })).status).toBe(403);
@@ -80,8 +89,9 @@ describe("signatures", () => {
   it("matches the Go connector's signature vector", async () => {
     const f = "connectors/whatsapp/testdata/signature_vector.json";
     if (!existsSync(f)) return;
-    const v = JSON.parse(readFileSync(f, "utf8"));
-    expect(sign(v.secret, String(v.ts), v.method, v.path, v.body)).toBe(v.signature);
+    const file = JSON.parse(readFileSync(f, "utf8"));
+    expect(file.vectors.length).toBeGreaterThan(0);
+    for (const v of file.vectors) expect(sign(file.secret, String(v.ts), v.method, v.path, v.body)).toBe(v.signature);
   });
 });
 
@@ -222,10 +232,10 @@ describe("health", () => {
   it("reports status and treats a stale report as down", async () => {
     const H = "/api/channel/whatsapp/health";
     expect((await signed(health, H, { connected: true, paired: true, loggedOut: false, version: "1", at: new Date().toISOString() })).status).toBe(204);
-    const s = await (status as H)(new Request("http://localhost/api/channel/whatsapp/status"));
+    const s = await (status as H)(new Request("http://localhost/api/channel/whatsapp/status"), { params: Promise.resolve({ channel: "whatsapp" }) } as never);
     expect((await s.json()).connected).toBe(true);
     await pool.query("UPDATE channel_status SET reported_at = now() - interval '10 minutes'");
-    expect((await ((await (status as H)(new Request("http://localhost/api/channel/whatsapp/status"))).json())).connected).toBe(false);
+    expect((await ((await (status as H)(new Request("http://localhost/api/channel/whatsapp/status"), { params: Promise.resolve({ channel: "whatsapp" }) } as never)).json())).connected).toBe(false);
     expect((await signed(health, H, { connected: "yes" })).status).toBe(422);
   });
 });
@@ -237,5 +247,67 @@ describe("retention", () => {
     await pool.query("UPDATE channel_inbox SET created_at = now() - interval '8 days'");
     await processInboxOnce();
     expect(await count("SELECT count(*)::int n FROM channel_inbox")).toBe(0);
+  });
+});
+
+describe("any channel", () => {
+  const smsIn = "/api/channel/sms/inbound";
+  const emailIn = "/api/channel/email/inbound";
+
+  it("unknown or unconfigured channels are refused", async () => {
+    expect((await signed(inbound, "/api/channel/fax/inbound", msg())).status).toBe(404);
+    expect((await signed(inbound, "/api/channel/telegram/inbound", msg(), {}, { secret: SECRET })).status).toBe(403);
+  });
+
+  it("each channel has its own secret", async () => {
+    const m = msg();
+    expect((await signed(inbound, smsIn, m, {}, { secret: SECRET })).status).toBe(403);
+    expect((await signed(inbound, smsIn, m)).status).toBe(202);
+    expect((await signed(inbound, IN, msg(), {}, { secret: SMS_SECRET })).status).toBe(403);
+  });
+
+  it("a text-only channel rejects images and caps the reply, keeping the link", async () => {
+    expect((await signed(inbound, smsIn, msg({ image: IMG }))).status).toBe(422);
+    interpret.mockResolvedValue({ observations: [], proposedRequirements: [], clarification: null, reply: "long ".repeat(400) });
+    await signed(inbound, smsIn, msg());
+    await processInboxOnce("sms");
+    const body = (await pool.query("SELECT body FROM channel_outbox WHERE channel='sms'")).rows[0].body as string;
+    expect(body.length).toBeLessThanOrEqual(480);
+    expect(body).toMatch(/https:\/\/app\.test\/t\/[0-9a-f-]{36}#k=[A-Za-z0-9_-]+$/);
+  });
+
+  it("the same number on two channels is two separate tasks, and tokens do not cross", async () => {
+    await signed(inbound, IN, msg({ text: "carrier" }));
+    await signed(inbound, smsIn, msg({ text: "carrier" }));
+    await processInboxOnce();
+    const rows = (await pool.query("SELECT channel, task_id, grant_id FROM channel_identities ORDER BY channel")).rows;
+    expect(rows.map((r) => r.channel)).toEqual(["sms", "whatsapp"]);
+    expect(rows[0].task_id).not.toBe(rows[1].task_id);
+    const { deriveChannelToken } = await import("@/channel/bridge");
+    const smsToken = deriveChannelToken("sms", rows[0].grant_id);
+    expect((await getTaskView(rows[0].task_id, smsToken)).title).toBeTruthy();
+    await expect(getTaskView(rows[0].task_id, deriveChannelToken("whatsapp", rows[0].grant_id))).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("works with a non-phone identity such as an email address", async () => {
+    expect((await signed(inbound, emailIn, msg({ sender: "mum@example.com", text: "Need a cat carrier" }))).json.status).toBe("accepted");
+    expect((await signed(inbound, emailIn, msg({ sender: "mum@evil.test", text: "hi" }))).json.status).toBe("ignored");
+    expect((await signed(inbound, emailIn, msg({ sender: "not an address" }))).status).toBe(422);
+    await processInboxOnce("email");
+    const out = (await pool.query("SELECT recipient, body FROM channel_outbox WHERE channel='email'")).rows[0];
+    expect(out.recipient).toBe("mum@example.com");
+    expect(out.body).toContain("https://app.test/t/");
+  });
+
+  it("a connector only claims its own channel's messages", async () => {
+    await signed(inbound, IN, msg({ text: "one" }));
+    await signed(inbound, smsIn, msg({ text: "two" }));
+    await processInboxOnce();
+    const a = await signed(claim, "/api/channel/sms/outbox/claim", {});
+    expect(a.json.items).toHaveLength(1);
+    const b = await signed(claim, "/api/channel/whatsapp/outbox/claim", {});
+    expect(b.json.items).toHaveLength(1);
+    const wrong = await signed(ack, `/api/channel/whatsapp/outbox/${a.json.items[0].id}/ack`, { state: "sent" });
+    expect(wrong.status).toBe(404);
   });
 });

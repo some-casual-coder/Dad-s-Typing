@@ -1,14 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { DomainError } from "@/domain/errors";
+import { channelSecret, getChannel } from "./registry";
 
 const MAX_SKEW_S = 300;
 export const MAX_BODY = 6 * 1024 * 1024;
-
-export function bridgeSecret(env = process.env): string {
-  const s = env.WHATSAPP_BRIDGE_SECRET ?? "";
-  if (s.length < 32) throw new DomainError("forbidden", "Channel bridge is not configured");
-  return s;
-}
 
 export const sign = (secret: string, ts: string, method: string, path: string, body: string) =>
   createHmac("sha256", secret).update(`${ts}\n${method}\n${path}\n${body}`).digest("hex");
@@ -19,8 +14,8 @@ function safeEqual(a: string, b: string) {
 }
 
 // Fails closed: no secret, no signature, stale clock or wrong MAC all reject
-export function verifySigned(req: Request, body: string, now = Date.now()) {
-  const secret = bridgeSecret();
+export function verifySigned(channel: string, req: Request, body: string, now = Date.now()) {
+  const secret = channelSecret(channel);
   const ts = req.headers.get("x-dt-timestamp") ?? "";
   const sig = req.headers.get("x-dt-signature") ?? "";
   if (!/^\d{10}$/.test(ts) || !/^[0-9a-f]{64}$/.test(sig)) throw new DomainError("forbidden", "Bad signature");
@@ -30,12 +25,13 @@ export function verifySigned(req: Request, body: string, now = Date.now()) {
 }
 
 // Read the raw body first: the MAC covers the exact bytes
-export async function readSigned(req: Request): Promise<Record<string, unknown>> {
+export async function readSigned(channel: string, req: Request): Promise<Record<string, unknown>> {
+  getChannel(channel);
   const len = Number(req.headers.get("content-length") ?? "0");
   if (len > MAX_BODY) throw new DomainError("invalid", "Body too large");
   const text = await req.text();
   if (text.length > MAX_BODY) throw new DomainError("invalid", "Body too large");
-  verifySigned(req, text);
+  verifySigned(channel, req, text);
   try {
     const v = JSON.parse(text || "{}");
     if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error();
@@ -45,13 +41,9 @@ export async function readSigned(req: Request): Promise<Record<string, unknown>>
   }
 }
 
-// The server can rebuild a channel grant's bearer without storing it
-export const deriveChannelToken = (grantId: string, secret = bridgeSecret()) =>
-  createHmac("sha256", secret).update(`grant:${grantId}`).digest("base64url");
+// Keyed per channel, so one connector's secret never yields another's tokens
+export const deriveChannelToken = (channel: string, grantId: string) =>
+  createHmac("sha256", channelSecret(channel)).update(`grant:${channel}:${grantId}`).digest("base64url");
 
-export const senderHash = (sender: string, secret = bridgeSecret()) =>
-  createHmac("sha256", secret).update(`sender:${sender}`).digest("hex");
-
-export function allowedSenders(env = process.env): Set<string> {
-  return new Set((env.WHATSAPP_ALLOWED_SENDERS ?? "").split(",").map((s) => s.trim()).filter((s) => /^\d{6,15}$/.test(s)));
-}
+export const senderHash = (channel: string, sender: string) =>
+  createHmac("sha256", channelSecret(channel)).update(`sender:${channel}:${sender}`).digest("hex");
