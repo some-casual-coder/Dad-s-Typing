@@ -21,6 +21,8 @@ type TS interface {
 	Ack(ctx context.Context, id string, a tsapp.Ack) error
 }
 
+// Worker budget: ClaimLimit * (SendTimeout + MinDelay + Jitter) must stay
+// below LeaseSeconds; handle re-checks the remaining lease before each send.
 type Worker struct {
 	Store *store.Store
 	TS    TS
@@ -37,9 +39,12 @@ type Worker struct {
 	Jitter        time.Duration
 	RecipientCap  int
 	RecipientSpan time.Duration
-	AckTries      int
+	// AckBackoff doubles per failed ack up to AckMaxBackoff.
 	AckBackoff    time.Duration
+	AckMaxBackoff time.Duration
 	SendTimeout   time.Duration
+	// RecordTimeout bounds ledger writes and acks after a send returns.
+	RecordTimeout time.Duration
 	lastSend      time.Time
 }
 
@@ -58,18 +63,19 @@ func RealSleep(ctx context.Context, d time.Duration) error {
 
 func (w *Worker) Run(ctx context.Context) {
 	for ctx.Err() == nil {
-		n := w.Poll(ctx)
-		if n == 0 {
+		if w.Poll(ctx) == 0 {
 			_ = w.Sleep(ctx, w.PollEvery)
 		}
 	}
 }
 
-// Poll claims and processes one batch; it returns the items handled.
+// Poll retries owed acks, then claims and processes one batch.
 func (w *Worker) Poll(ctx context.Context) int {
+	w.retryAcks(ctx)
 	if !w.TR.State().Ready() {
 		return 0
 	}
+	claimedAt := w.Now()
 	items, err := w.TS.Claim(ctx, w.ClaimLimit, w.LeaseSeconds)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -82,86 +88,133 @@ func (w *Worker) Poll(ctx context.Context) int {
 		if ctx.Err() != nil || !w.TR.State().Ready() {
 			break
 		}
-		w.handle(ctx, it)
+		if w.handle(ctx, it, claimedAt) {
+			break
+		}
 		done++
 	}
 	return done
 }
 
-func (w *Worker) handle(ctx context.Context, it tsapp.Item) {
+// leaseFits reports whether a send after wait ends before the lease does.
+func (w *Worker) leaseFits(claimedAt time.Time, wait time.Duration) bool {
+	left := time.Duration(w.LeaseSeconds)*time.Second - w.Now().Sub(claimedAt)
+	return left >= wait+w.SendTimeout
+}
+
+// handle processes one item; true means stop the batch.
+func (w *Worker) handle(ctx context.Context, it tsapp.Item, claimedAt time.Time) bool {
 	if _, err := uuid.Parse(it.ID); err != nil {
 		w.Log.Error("outbox item with bad id skipped")
-		return
+		return false
 	}
 	led, err := w.Store.GetLedger(ctx, it.ID)
 	if err != nil {
 		w.Log.Error("ledger read failed", "err", "db")
-		return
+		return false
 	}
 	if led != nil {
-		w.resolveExisting(ctx, it.ID, led)
-		return
+		w.resolveExisting(ctx, led)
+		return false
 	}
 	if !digits.MatchString(it.Recipient) || it.Body == "" {
-		w.record(ctx, it.ID, it.Recipient, "", store.LedgerFailed, "invalid_item")
-		w.ack(ctx, it.ID, tsapp.Ack{State: "failed", Error: "invalid_item"})
-		return
+		w.settleFailed(ctx, it, "invalid_item")
+		return false
+	}
+	known, err := w.Store.IsKnownSender(ctx, it.Recipient)
+	if err != nil {
+		w.Log.Error("known sender read failed", "err", "db")
+		return false
+	}
+	if !known {
+		w.settleFailed(ctx, it, "unknown_recipient")
+		return false
 	}
 	n, err := w.Store.RecentSends(ctx, it.Recipient, w.Now().Add(-w.RecipientSpan))
 	if err != nil {
 		w.Log.Error("ledger read failed", "err", "db")
-		return
+		return false
 	}
 	if n >= w.RecipientCap {
-		w.record(ctx, it.ID, it.Recipient, "", store.LedgerFailed, "recipient_cap")
-		w.ack(ctx, it.ID, tsapp.Ack{State: "failed", Error: "recipient_cap"})
-		return
+		w.settleFailed(ctx, it, "recipient_cap")
+		return false
 	}
-	if err := w.pace(ctx); err != nil {
-		return
+	wait := w.paceWait()
+	if !w.leaseFits(claimedAt, wait) {
+		w.Log.Warn("outbox batch stopped: lease budget exhausted")
+		return true
+	}
+	if wait > 0 && w.Sleep(ctx, wait) != nil {
+		return true
 	}
 	w.dispatch(ctx, it)
+	return false
 }
 
-func (w *Worker) record(ctx context.Context, id, rcpt, msgID, state, code string) {
+func (w *Worker) settleFailed(ctx context.Context, it tsapp.Item, code string) {
 	now := w.Now()
-	if _, err := w.Store.BeginDispatch(ctx, id, rcpt, msgID, now); err != nil {
+	if _, err := w.Store.BeginDispatch(ctx, it.ID, it.Recipient, "", now); err != nil {
 		w.Log.Error("ledger write failed", "err", "db")
 		return
 	}
-	if err := w.Store.SetLedger(ctx, id, state, code, now); err != nil {
+	if err := w.Store.SetLedger(ctx, it.ID, store.LedgerFailed, code, now); err != nil {
 		w.Log.Error("ledger write failed", "err", "db")
+		return
 	}
+	w.ack(ctx, it.ID, tsapp.Ack{State: "failed", Error: code})
 }
 
-func (w *Worker) resolveExisting(ctx context.Context, id string, l *store.Ledger) {
+func ackFor(l store.Ledger) tsapp.Ack {
 	switch l.State {
 	case store.LedgerSent:
-		w.ack(ctx, id, tsapp.Ack{State: "sent", ProviderMessageID: l.ClientMsgID})
+		return tsapp.Ack{State: "sent", ProviderMessageID: l.ClientMsgID}
 	case store.LedgerFailed:
-		w.ack(ctx, id, tsapp.Ack{State: "failed", Error: l.Error})
-	default:
-		if l.State == store.LedgerDispatching {
-			_ = w.Store.SetLedger(ctx, id, store.LedgerUnknown, "interrupted", w.Now())
+		return tsapp.Ack{State: "failed", Error: l.Error}
+	}
+	code := l.Error
+	if code == "" {
+		code = "send_error"
+	}
+	return tsapp.Ack{State: "unknown", Error: code}
+}
+
+func (w *Worker) resolveExisting(ctx context.Context, l *store.Ledger) {
+	if l.State == store.LedgerDispatching {
+		_ = w.Store.SetLedger(ctx, l.OutboxID, store.LedgerUnknown,
+			"interrupted", w.Now())
+		l.State, l.Error = store.LedgerUnknown, "interrupted"
+	}
+	// Re-ack even when acked: the app redelivered it, and acks are idempotent.
+	w.ack(ctx, l.OutboxID, ackFor(*l))
+}
+
+func (w *Worker) retryAcks(ctx context.Context) {
+	rows, err := w.Store.DueAcks(ctx, w.Now(), 10)
+	if err != nil {
+		w.Log.Error("ledger read failed", "err", "db")
+		return
+	}
+	for _, l := range rows {
+		if ctx.Err() != nil {
+			return
 		}
-		w.ack(ctx, id, tsapp.Ack{State: "unknown", Error: "interrupted"})
+		w.ack(ctx, l.OutboxID, ackFor(l))
 	}
 }
 
-func (w *Worker) pace(ctx context.Context) error {
-	if !w.lastSend.IsZero() {
-		wait := w.MinDelay - w.Now().Sub(w.lastSend)
-		if wait < 0 {
-			wait = 0
-		}
-		if w.Jitter > 0 {
-			wait += time.Duration(rand.Int64N(int64(w.Jitter)))
-		}
-		if wait > 0 {
-			return w.Sleep(ctx, wait)
-		}
+// paceWait is the delay owed before the next send, with jitter.
+func (w *Worker) paceWait() time.Duration {
+	if w.lastSend.IsZero() {
+		return 0
 	}
-	return nil
+	wait := w.MinDelay - w.Now().Sub(w.lastSend)
+	if wait < 0 {
+		wait = 0
+	}
+	if w.Jitter > 0 {
+		wait += time.Duration(rand.Int64N(int64(w.Jitter)))
+	}
+	return wait
 }
 
 func (w *Worker) dispatch(ctx context.Context, it tsapp.Item) {
@@ -172,49 +225,56 @@ func (w *Worker) dispatch(ctx context.Context, it tsapp.Item) {
 		return
 	}
 	// Detached from shutdown: a send in flight must finish and be recorded.
-	sctx, cancel := context.WithTimeout(context.Background(), w.SendTimeout)
-	defer cancel()
+	base := context.WithoutCancel(ctx)
+	sctx, cancel := context.WithTimeout(base, w.SendTimeout)
 	err = w.TR.Send(sctx, it.Recipient, it.Body, msgID)
+	cancel()
 	w.lastSend = w.Now()
+
+	rctx, rcancel := context.WithTimeout(base, w.RecordTimeout)
+	defer rcancel()
+	var state, code string
 	switch {
 	case err == nil:
-		_ = w.Store.SetLedger(ctx, it.ID, store.LedgerSent, "", w.Now())
-		w.Log.Info("outbox sent", "id", inbound.Redact(it.ID))
-		w.ack(ctx, it.ID, tsapp.Ack{State: "sent", ProviderMessageID: msgID})
+		state = store.LedgerSent
 	case errors.Is(err, transport.ErrNotReady):
 		// Never left; drop the row so the lease expiry retries it.
-		_ = w.Store.DropLedger(ctx, it.ID)
+		_ = w.Store.DropLedger(rctx, it.ID)
 		w.Log.Warn("outbox send deferred", "err", "not_ready")
+		return
 	case errors.Is(err, transport.ErrRejected):
-		_ = w.Store.SetLedger(ctx, it.ID, store.LedgerFailed, "rejected", w.Now())
-		w.ack(ctx, it.ID, tsapp.Ack{State: "failed", Error: "rejected"})
+		state, code = store.LedgerFailed, "rejected"
 	default:
-		_ = w.Store.SetLedger(ctx, it.ID, store.LedgerUnknown, "send_error", w.Now())
-		w.Log.Warn("outbox send ambiguous", "id", inbound.Redact(it.ID))
-		w.ack(ctx, it.ID, tsapp.Ack{State: "unknown", Error: "send_error"})
+		state, code = store.LedgerUnknown, "send_error"
 	}
+	if serr := w.Store.SetLedger(rctx, it.ID, state, code, w.Now()); serr != nil &&
+		state == store.LedgerSent {
+		// Cannot prove the record; never claim sent without it.
+		w.Log.Error("ledger write failed after send", "err", "db")
+		state, code = store.LedgerUnknown, "ledger_error"
+	}
+	w.Log.Info("outbox settled", "id", inbound.Redact(it.ID), "state", state)
+	a := ackFor(store.Ledger{State: state, Error: code, ClientMsgID: msgID})
+	w.ack(rctx, it.ID, a)
 }
 
-// ack retries a bounded number of times; the ledger covers the remainder.
+// ack records success, or schedules a retry that keeps the ledger row.
 func (w *Worker) ack(ctx context.Context, id string, a tsapp.Ack) {
-	var err error
-	for i := 0; i < w.AckTries; i++ {
-		if err = w.TS.Ack(ctx, id, a); err == nil {
-			_ = w.Store.MarkAcked(ctx, id)
-			return
-		}
-		if tsapp.IsPermanent(err) {
-			_ = w.Store.MarkAcked(ctx, id)
-			break
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		d := w.AckBackoff << i
-		if w.Sleep(ctx, d+time.Duration(rand.Int64N(int64(d)+1))/4) != nil {
-			break
-		}
+	err := w.TS.Ack(ctx, id, a)
+	if err == nil {
+		_ = w.Store.MarkAcked(ctx, id)
+		return
 	}
+	attempts := 1
+	if l, lerr := w.Store.GetLedger(ctx, id); lerr == nil && l != nil {
+		attempts = l.AckAttempts + 1
+	}
+	d := w.AckBackoff << min(attempts-1, 16)
+	if d > w.AckMaxBackoff || d <= 0 {
+		d = w.AckMaxBackoff
+	}
+	d += time.Duration(rand.Int64N(int64(d)/4 + 1))
+	_ = w.Store.AckFailed(ctx, id, attempts, w.Now().Add(d))
 	w.Log.Warn("outbox ack failed", "id", inbound.Redact(id), "err", codeOf(err))
 }
 

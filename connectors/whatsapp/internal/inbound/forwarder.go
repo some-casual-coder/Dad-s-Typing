@@ -16,17 +16,22 @@ type Poster interface {
 }
 
 type Forwarder struct {
-	Store       *store.Store
-	Post        Poster
-	Log         *slog.Logger
-	Now         func() time.Time
-	MaxAttempts int
+	Store *store.Store
+	Post  Poster
+	Log   *slog.Logger
+	Now   func() time.Time
+	// BaseDelay doubles per attempt up to MaxDelay; FailedRetry spaces retries
+	// of rows the app rejected permanently.
 	BaseDelay   time.Duration
 	MaxDelay    time.Duration
+	FailedRetry time.Duration
 	// PollEvery bounds idle sleep when nothing is scheduled.
 	PollEvery time.Duration
 	wake      chan struct{}
 }
+
+// Init must be called before Wake or Run.
+func (f *Forwarder) Init() { f.wake = make(chan struct{}, 1) }
 
 func (f *Forwarder) Wake() {
 	if f.wake == nil {
@@ -37,9 +42,6 @@ func (f *Forwarder) Wake() {
 	default:
 	}
 }
-
-// Init must be called before Wake or Run.
-func (f *Forwarder) Init() { f.wake = make(chan struct{}, 1) }
 
 // Run forwards due rows one at a time until ctx ends.
 func (f *Forwarder) Run(ctx context.Context) {
@@ -86,19 +88,25 @@ func (f *Forwarder) Step(ctx context.Context) (bool, error) {
 	if m.ImageB64 != "" {
 		p.Image = &tsapp.Image{Mime: m.ImageMime, Base64: m.ImageB64}
 	}
-	_, perr := f.Post.Inbound(ctx, p)
+	status, perr := f.Post.Inbound(ctx, p)
 	if perr == nil {
-		f.Log.Info("inbound forwarded", "id", Redact(m.ProviderID))
-		return true, f.Store.MarkForwarded(ctx, m.ID)
+		if status == "ignored" {
+			_ = f.Store.ForgetSender(ctx, m.Sender)
+		}
+		f.Log.Info("inbound forwarded", "id", Redact(m.ProviderID),
+			"status", status)
+		return true, f.Store.MarkForwarded(ctx, m.ID, f.Now())
 	}
 	if ctx.Err() != nil {
 		return false, nil
 	}
 	attempts := m.Attempts + 1
-	if tsapp.IsPermanent(perr) || attempts >= f.MaxAttempts {
-		f.Log.Error("inbound failed permanently", "id", Redact(m.ProviderID),
-			"attempts", attempts)
-		return true, f.Store.MarkInboxFailed(ctx, m.ID, attempts, errCode(perr))
+	if tsapp.IsPermanent(perr) {
+		f.Log.Error("inbound rejected by app, kept for slow retry",
+			"id", Redact(m.ProviderID), "attempts", attempts, "err", errCode(perr))
+		next := f.Now().Add(f.FailedRetry)
+		return true, f.Store.MarkInboxFailed(ctx, m.ID, attempts, next,
+			errCode(perr), f.Now())
 	}
 	f.Log.Warn("inbound forward failed", "id", Redact(m.ProviderID),
 		"attempts", attempts, "err", errCode(perr))

@@ -16,13 +16,15 @@ type Poster interface {
 }
 
 type Reporter struct {
-	Post    Poster
-	State   func() transport.State
-	Version string
-	Log     *slog.Logger
-	Now     func() time.Time
-	Every   time.Duration
-	kick    chan struct{}
+	Post  Poster
+	State func() transport.State
+	// Degraded, if set, flags unresolved failures (e.g. failed inbox rows).
+	Degraded func(ctx context.Context) bool
+	Version  string
+	Log      *slog.Logger
+	Now      func() time.Time
+	Every    time.Duration
+	kick     chan struct{}
 }
 
 func (r *Reporter) Init() { r.kick = make(chan struct{}, 1) }
@@ -37,7 +39,9 @@ func (r *Reporter) Notify() {
 
 func (r *Reporter) Report(ctx context.Context) error {
 	s := r.State()
+	degraded := r.Degraded != nil && r.Degraded(ctx)
 	return r.Post.Health(ctx, tsapp.Health{
+		Degraded:  degraded,
 		Connected: s.Connected,
 		Paired:    s.Paired,
 		LoggedOut: s.Halted,

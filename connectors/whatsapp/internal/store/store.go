@@ -22,10 +22,17 @@ const (
 	LedgerFailed      = "failed"
 )
 
+const (
+	ForwardedTTL = 72 * time.Hour
+	FailedTTL    = 7 * 24 * time.Hour
+	LedgerTTL    = 7 * 24 * time.Hour
+	KnownTTL     = 30 * 24 * time.Hour
+)
+
 const schema = `
 CREATE TABLE IF NOT EXISTS inbox (
   id INTEGER PRIMARY KEY,
-  provider_id TEXT NOT NULL UNIQUE,
+  provider_id TEXT NOT NULL,
   sender TEXT NOT NULL,
   text TEXT,
   image_mime TEXT,
@@ -34,9 +41,16 @@ CREATE TABLE IF NOT EXISTS inbox (
   state TEXT NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
   next_attempt_at INTEGER NOT NULL,
-  last_error TEXT
+  last_error TEXT,
+  settled_at INTEGER,
+  UNIQUE (sender, provider_id)
 );
 CREATE INDEX IF NOT EXISTS idx_inbox_due ON inbox (state, next_attempt_at);
+CREATE TABLE IF NOT EXISTS known_senders (
+  sender TEXT PRIMARY KEY,
+  first_seen INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sent_ledger (
   outbox_id TEXT PRIMARY KEY,
   recipient TEXT NOT NULL,
@@ -44,6 +58,8 @@ CREATE TABLE IF NOT EXISTS sent_ledger (
   state TEXT NOT NULL,
   error TEXT,
   acked INTEGER NOT NULL DEFAULT 0,
+  ack_attempts INTEGER NOT NULL DEFAULT 0,
+  next_ack_at INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -109,9 +125,15 @@ type InboxMsg struct {
 	Attempts   int
 }
 
-// InsertInbox stores a message; false means the provider id already exists.
+// InsertInbox stores a message and marks its sender known in one transaction;
+// false means (sender, provider id) already exists.
 func (s *Store) InsertInbox(ctx context.Context, m InboxMsg, now time.Time) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO inbox
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO inbox
 	  (provider_id, sender, text, image_mime, image_b64, received_at,
 	   state, next_attempt_at)
 	  VALUES (?,?,?,?,?,?,?,?)`,
@@ -121,7 +143,16 @@ func (s *Store) InsertInbox(ctx context.Context, m InboxMsg, now time.Time) (boo
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n == 1, err
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO known_senders
+	  (sender, first_seen, last_seen) VALUES (?,?,?)
+	  ON CONFLICT(sender) DO UPDATE SET last_seen=excluded.last_seen`,
+		m.Sender, ms(now), ms(now)); err != nil {
+		return false, err
+	}
+	return n == 1, tx.Commit()
 }
 
 func nullable(s string) any {
@@ -131,26 +162,44 @@ func nullable(s string) any {
 	return s
 }
 
-func (s *Store) HasInbox(ctx context.Context, providerID string) (bool, error) {
+func (s *Store) HasInbox(ctx context.Context, sender, providerID string) (bool, error) {
 	var one int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT 1 FROM inbox WHERE provider_id=?`, providerID).Scan(&one)
+		`SELECT 1 FROM inbox WHERE sender=? AND provider_id=?`,
+		sender, providerID).Scan(&one)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-// NextDue returns the oldest unforwarded row that is due, or nil.
+func (s *Store) IsKnownSender(ctx context.Context, sender string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM known_senders WHERE sender=?`, sender).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (s *Store) ForgetSender(ctx context.Context, sender string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM known_senders WHERE sender=?`, sender)
+	return err
+}
+
+// NextDue returns the oldest due row (received, or failed on its slow retry).
 func (s *Store) NextDue(ctx context.Context, now time.Time) (*InboxMsg, error) {
 	var m InboxMsg
 	var text, mime, b64 sql.NullString
 	var rec int64
 	err := s.db.QueryRowContext(ctx, `SELECT id, provider_id, sender, text,
 	  image_mime, image_b64, received_at, attempts FROM inbox
-	  WHERE state=? AND next_attempt_at<=? ORDER BY next_attempt_at, id LIMIT 1`,
-		InboxReceived, ms(now)).Scan(&m.ID, &m.ProviderID, &m.Sender, &text,
-		&mime, &b64, &rec, &m.Attempts)
+	  WHERE state IN (?,?) AND next_attempt_at<=?
+	  ORDER BY next_attempt_at, id LIMIT 1`,
+		InboxReceived, InboxFailed, ms(now)).Scan(&m.ID, &m.ProviderID,
+		&m.Sender, &text, &mime, &b64, &rec, &m.Attempts)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -162,23 +211,23 @@ func (s *Store) NextDue(ctx context.Context, now time.Time) (*InboxMsg, error) {
 	return &m, nil
 }
 
-// NextInboxAt returns when the next pending row is due, if any.
+// NextInboxAt returns when the next retryable row is due, if any.
 func (s *Store) NextInboxAt(ctx context.Context) (time.Time, bool, error) {
 	var at sql.NullInt64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT MIN(next_attempt_at) FROM inbox WHERE state=?`,
-		InboxReceived).Scan(&at)
+		`SELECT MIN(next_attempt_at) FROM inbox WHERE state IN (?,?)`,
+		InboxReceived, InboxFailed).Scan(&at)
 	if err != nil || !at.Valid {
 		return time.Time{}, false, err
 	}
 	return time.UnixMilli(at.Int64), true, nil
 }
 
-// MarkForwarded also drops the payload; the app owns it from here.
-func (s *Store) MarkForwarded(ctx context.Context, id int64) error {
+// MarkForwarded drops the payload; the app owns it from here.
+func (s *Store) MarkForwarded(ctx context.Context, id int64, now time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE inbox SET state=?, text=NULL,
-	  image_b64=NULL, image_mime=NULL, last_error=NULL WHERE id=?`,
-		InboxForwarded, id)
+	  image_b64=NULL, image_mime=NULL, last_error=NULL, settled_at=?
+	  WHERE id=?`, InboxForwarded, ms(now), id)
 	return err
 }
 
@@ -189,11 +238,12 @@ func (s *Store) Reschedule(ctx context.Context, id int64, attempts int,
 	return err
 }
 
+// MarkInboxFailed keeps the payload and schedules a slow retry.
 func (s *Store) MarkInboxFailed(ctx context.Context, id int64, attempts int,
-	code string) error {
+	next time.Time, code string, now time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE inbox SET state=?, attempts=?,
-	  last_error=?, text=NULL, image_b64=NULL WHERE id=?`,
-		InboxFailed, attempts, code, id)
+	  next_attempt_at=?, last_error=?, settled_at=COALESCE(settled_at, ?)
+	  WHERE id=?`, InboxFailed, attempts, ms(next), code, ms(now), id)
 	return err
 }
 
@@ -203,13 +253,51 @@ func (s *Store) PendingInbox(ctx context.Context) (n int, err error) {
 	return
 }
 
-func (s *Store) InboxState(ctx context.Context, providerID string) (string, int, error) {
+func (s *Store) FailedInbox(ctx context.Context) (n int, err error) {
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM inbox WHERE state=?`, InboxFailed).Scan(&n)
+	return
+}
+
+func (s *Store) InboxState(ctx context.Context, sender, providerID string) (string, int, error) {
 	var st string
 	var n int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT state, attempts FROM inbox WHERE provider_id=?`,
-		providerID).Scan(&st, &n)
+		`SELECT state, attempts FROM inbox WHERE sender=? AND provider_id=?`,
+		sender, providerID).Scan(&st, &n)
 	return st, n, err
+}
+
+// Purged counts rows removed by one retention pass.
+type Purged struct{ Forwarded, Failed, Ledger, Known int64 }
+
+// Purge applies the retention windows; failed rows are only removed past
+// their TTL and unacked ledger rows are never removed.
+func (s *Store) Purge(ctx context.Context, now time.Time) (Purged, error) {
+	var p Purged
+	run := func(dst *int64, q string, args ...any) error {
+		res, err := s.db.ExecContext(ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		*dst, err = res.RowsAffected()
+		return err
+	}
+	if err := run(&p.Forwarded, `DELETE FROM inbox WHERE state=? AND
+	  settled_at<?`, InboxForwarded, ms(now.Add(-ForwardedTTL))); err != nil {
+		return p, err
+	}
+	if err := run(&p.Failed, `DELETE FROM inbox WHERE state=? AND
+	  settled_at<?`, InboxFailed, ms(now.Add(-FailedTTL))); err != nil {
+		return p, err
+	}
+	if err := run(&p.Ledger, `DELETE FROM sent_ledger WHERE acked=1 AND
+	  updated_at<?`, ms(now.Add(-LedgerTTL))); err != nil {
+		return p, err
+	}
+	err := run(&p.Known, `DELETE FROM known_senders WHERE last_seen<?`,
+		ms(now.Add(-KnownTTL)))
+	return p, err
 }
 
 type Ledger struct {
@@ -219,6 +307,7 @@ type Ledger struct {
 	State       string
 	Error       string
 	Acked       bool
+	AckAttempts int
 }
 
 // BeginDispatch records intent to send; false means a row already exists.
@@ -240,9 +329,9 @@ func (s *Store) GetLedger(ctx context.Context, outboxID string) (*Ledger, error)
 	var e sql.NullString
 	var acked int
 	err := s.db.QueryRowContext(ctx, `SELECT outbox_id, recipient,
-	  client_msg_id, state, error, acked FROM sent_ledger WHERE outbox_id=?`,
-		outboxID).Scan(&l.OutboxID, &l.Recipient, &l.ClientMsgID, &l.State,
-		&e, &acked)
+	  client_msg_id, state, error, acked, ack_attempts FROM sent_ledger
+	  WHERE outbox_id=?`, outboxID).Scan(&l.OutboxID, &l.Recipient,
+		&l.ClientMsgID, &l.State, &e, &acked, &l.AckAttempts)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -298,4 +387,36 @@ func (s *Store) PendingAcks(ctx context.Context) (n int, err error) {
 	err = s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sent_ledger WHERE acked=0`).Scan(&n)
 	return
+}
+
+// AckFailed schedules the next ack retry for a settled ledger row.
+func (s *Store) AckFailed(ctx context.Context, outboxID string, attempts int,
+	next time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE sent_ledger SET ack_attempts=?,
+	  next_ack_at=? WHERE outbox_id=?`, attempts, ms(next), outboxID)
+	return err
+}
+
+// DueAcks lists settled rows whose ack is still owed and due for a retry.
+func (s *Store) DueAcks(ctx context.Context, now time.Time, limit int) ([]Ledger, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT outbox_id, recipient,
+	  client_msg_id, state, error, ack_attempts FROM sent_ledger
+	  WHERE acked=0 AND state<>? AND next_ack_at<=?
+	  ORDER BY next_ack_at LIMIT ?`, LedgerDispatching, ms(now), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Ledger
+	for rows.Next() {
+		var l Ledger
+		var e sql.NullString
+		if err := rows.Scan(&l.OutboxID, &l.Recipient, &l.ClientMsgID,
+			&l.State, &e, &l.AckAttempts); err != nil {
+			return nil, err
+		}
+		l.Error = e.String
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }

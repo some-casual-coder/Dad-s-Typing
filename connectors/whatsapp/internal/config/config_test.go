@@ -61,3 +61,50 @@ func TestAdminAddrLoopbackForms(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPSRequiredUnlessLoopbackOrOptIn(t *testing.T) {
+	for _, u := range []string{"http://127.0.0.1:3000", "http://localhost:3000",
+		"http://[::1]:3000", "https://app.example.com"} {
+		m := base()
+		m["TS_BASE_URL"] = u
+		c, err := Load(env(m))
+		if err != nil || c.InsecureTS {
+			t.Errorf("%s: err=%v insecure=%v", u, err, c.InsecureTS)
+		}
+	}
+	m := base()
+	m["TS_BASE_URL"] = "http://app:3000"
+	if _, err := Load(env(m)); err == nil {
+		t.Fatal("plain http to remote host accepted")
+	}
+	m["ALLOW_INSECURE_TS_URL"] = "1"
+	c, err := Load(env(m))
+	if err != nil || !c.InsecureTS {
+		t.Fatalf("opt-in: err=%v insecure=%v", err, c.InsecureTS)
+	}
+	m["ALLOW_INSECURE_TS_URL"] = "true"
+	if _, err := Load(env(m)); err == nil {
+		t.Fatal("only the literal 1 may opt in")
+	}
+}
+
+func TestAdminTokenMustDifferFromSecret(t *testing.T) {
+	m := base()
+	m["ADMIN_TOKEN"] = good
+	if _, err := Load(env(m)); err == nil {
+		t.Fatal("equal token and secret accepted")
+	}
+}
+
+func TestAllowedSenders(t *testing.T) {
+	m := base()
+	m["ALLOWED_SENDERS"] = "254712345678, +254700000001,"
+	c, err := Load(env(m))
+	if err != nil || len(c.AllowedSenders) != 2 || c.AllowedSenders[1] != "254700000001" {
+		t.Fatalf("%v %v", c.AllowedSenders, err)
+	}
+	m["ALLOWED_SENDERS"] = "abc"
+	if _, err := Load(env(m)); err == nil {
+		t.Fatal("bad sender accepted")
+	}
+}

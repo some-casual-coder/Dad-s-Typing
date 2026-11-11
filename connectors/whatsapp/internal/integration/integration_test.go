@@ -52,17 +52,19 @@ func TestForwardedMessageRoundTrip(t *testing.T) {
 	defer st.Close()
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ts := tsapp.New(base, secret)
+	ts := tsapp.New(base, secret, "whatsapp")
 	fake := transport.NewFake()
-	fwd := &inbound.Forwarder{Store: st, Post: ts, Log: log, Now: time.Now, MaxAttempts: 5,
-		BaseDelay: 200 * time.Millisecond, MaxDelay: time.Second, PollEvery: 300 * time.Millisecond}
+	fwd := &inbound.Forwarder{Store: st, Post: ts, Log: log, Now: time.Now,
+		BaseDelay: 200 * time.Millisecond, MaxDelay: time.Second, FailedRetry: time.Minute,
+		PollEvery: 300 * time.Millisecond}
 	fwd.Init()
 	ing := &inbound.Ingestor{Store: st, Log: log, Wake: fwd.Wake, Now: time.Now,
 		DownloadTries: 1, DownloadWait: time.Millisecond, MaxAge: time.Hour}
 	ob := &outbox.Worker{Store: st, TS: ts, TR: fake, Log: log, Now: time.Now,
 		Sleep: outbox.RealSleep, ClaimLimit: 5, LeaseSeconds: 60, PollEvery: 300 * time.Millisecond,
 		MinDelay: 10 * time.Millisecond, Jitter: time.Millisecond, RecipientCap: 20, RecipientSpan: time.Hour,
-		AckTries: 3, AckBackoff: 100 * time.Millisecond, SendTimeout: 5 * time.Second}
+		AckBackoff: 100 * time.Millisecond, AckMaxBackoff: time.Second,
+		SendTimeout: 5 * time.Second, RecordTimeout: 5 * time.Second}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

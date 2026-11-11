@@ -36,8 +36,7 @@ type WA struct {
 	client      *whatsmeow.Client
 	reason      string
 	bannedUntil time.Time
-	qr          string
-	pairing     bool
+	pair        pairing
 	rootCtx     context.Context
 }
 
@@ -152,8 +151,9 @@ func (w *WA) handle(cl *whatsmeow.Client, e any) {
 	case *events.Connected, *events.Disconnected, *events.PairSuccess:
 		if _, ok := e.(*events.PairSuccess); ok {
 			w.mu.Lock()
-			w.reason, w.qr = "", ""
+			w.reason = ""
 			w.mu.Unlock()
+			w.pair.clear()
 		}
 		w.emitState()
 	case *events.LoggedOut:
@@ -201,8 +201,18 @@ func mapMessage(cl *whatsmeow.Client, e *events.Message) *Message {
 		img := msg.GetImageMessage()
 		m.Kind, m.Text = KindImage, img.GetCaption()
 		m.ImageSize = int64(img.GetFileLength())
-		m.Image = func(ctx context.Context) ([]byte, error) {
-			return cl.Download(ctx, img)
+		m.Image = func(ctx context.Context, max int64) ([]byte, error) {
+			f := newMemFile(max + mediaOverhead)
+			if err := cl.DownloadToFile(ctx, img, f); err != nil {
+				if f.overflow {
+					return nil, ErrTooLarge
+				}
+				return nil, err
+			}
+			if int64(len(f.buf)) > max {
+				return nil, ErrTooLarge
+			}
+			return f.buf, nil
 		}
 	case msg.GetConversation() != "":
 		m.Kind, m.Text = KindText, msg.GetConversation()
@@ -264,101 +274,47 @@ func (w *WA) freshClient(ctx context.Context) {
 	}
 }
 
-var errPairing = errors.New("pairing already in progress")
-
-func (w *WA) beginPairing(ctx context.Context) (
+// openPairing swaps in a fresh client if needed and opens the QR channel.
+func (w *WA) openPairing(ctx context.Context) (
 	<-chan whatsmeow.QRChannelItem, context.CancelFunc, error) {
 	w.freshClient(ctx)
 	if w.State().Paired {
 		return nil, nil, errors.New("already paired")
 	}
-	w.mu.Lock()
-	if w.pairing {
-		w.mu.Unlock()
-		return nil, nil, errPairing
-	}
-	w.pairing = true
-	cl := w.client
-	w.mu.Unlock()
-	fail := func(err error, cancel context.CancelFunc) (
-		<-chan whatsmeow.QRChannelItem, context.CancelFunc, error) {
-		if cancel != nil {
-			cancel()
-		}
-		w.mu.Lock()
-		w.pairing = false
-		w.mu.Unlock()
-		return nil, nil, err
-	}
+	cl := w.cur()
 	pctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	ch, err := cl.GetQRChannel(pctx)
 	if err != nil {
-		return fail(err, cancel)
+		cancel()
+		return nil, nil, err
 	}
 	if err := cl.Connect(); err != nil {
-		return fail(err, cancel)
+		cancel()
+		return nil, nil, err
 	}
 	return ch, cancel, nil
 }
 
-func (w *WA) drainQR(cancel context.CancelFunc, ch <-chan whatsmeow.QRChannelItem) {
-	defer cancel()
-	for it := range ch {
-		w.mu.Lock()
-		w.qr = ""
-		if it.Event == "code" {
-			w.qr = it.Code
-		}
-		w.mu.Unlock()
+func (w *WA) source(ctx context.Context) pairSource {
+	return pairSource{
+		open: func() (<-chan whatsmeow.QRChannelItem, context.CancelFunc, error) {
+			return w.openPairing(ctx)
+		},
+		request: func(phone string) (string, error) {
+			return w.cur().PairPhone(context.Background(), phone, true,
+				whatsmeow.PairClientChrome, w.display)
+		},
 	}
-	w.mu.Lock()
-	w.pairing = false
-	w.mu.Unlock()
 }
 
 func (w *WA) StartQR(ctx context.Context) error {
-	ch, cancel, err := w.beginPairing(ctx)
-	if errors.Is(err, errPairing) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	go w.drainQR(cancel, ch)
-	return nil
+	return w.pair.startQR(w.source(ctx))
 }
 
-func (w *WA) QR() string {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.qr
-}
+func (w *WA) QR() string { return w.pair.current() }
 
-// PairPhone mirrors whatsmeow's flow: open QR channel, connect, then request.
 func (w *WA) PairPhone(ctx context.Context, phone string) (string, error) {
-	ch, cancel, err := w.beginPairing(ctx)
-	if err != nil {
-		return "", err
-	}
-	select {
-	case it := <-ch:
-		if it.Event == "code" {
-			w.mu.Lock()
-			w.qr = it.Code
-			w.mu.Unlock()
-		}
-	case <-ctx.Done():
-		cancel()
-		return "", ctx.Err()
-	}
-	code, err := w.cur().PairPhone(context.Background(), phone, true,
-		whatsmeow.PairClientChrome, w.display)
-	if err != nil {
-		cancel()
-		return "", err
-	}
-	go w.drainQR(cancel, ch)
-	return code, nil
+	return w.pair.phone(ctx, w.source(ctx), phone)
 }
 
 func (w *WA) Logout(ctx context.Context) error {

@@ -20,14 +20,20 @@ type Server struct {
 	*httptest.Server
 	mu          sync.Mutex
 	FailInbound int
-	FailAck     bool
-	Accepted    map[string]int
-	Calls       int
-	Queue       []tsapp.Item
-	Acks        map[string][]tsapp.Ack
-	Healths     []tsapp.Health
-	BadSig      int
-	Last        []tsapp.InboundPayload
+	// InboundCode, when set, is returned for every inbound call.
+	InboundCode int
+	// Ignore makes inbound answer status "ignored".
+	Ignore bool
+	// AckCode, when set, is returned for every ack call.
+	AckCode  int
+	FailAck  bool
+	Accepted map[string]int
+	Calls    int
+	Queue    []tsapp.Item
+	Acks     map[string][]tsapp.Ack
+	Healths  []tsapp.Health
+	BadSig   int
+	Last     []tsapp.InboundPayload
 }
 
 func New() *Server {
@@ -54,6 +60,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "/api/channel/whatsapp/inbound":
 		s.Calls++
+		if s.InboundCode != 0 {
+			w.WriteHeader(s.InboundCode)
+			return
+		}
 		if s.FailInbound > 0 {
 			s.FailInbound--
 			w.WriteHeader(http.StatusInternalServerError)
@@ -64,6 +74,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.Accepted[in.ProviderMessageID]++
 		s.Last = append(s.Last, in)
 		w.WriteHeader(http.StatusAccepted)
+		if s.Ignore {
+			_, _ = w.Write([]byte(`{"status":"ignored"}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"status":"accepted"}`))
 	case p == "/api/channel/whatsapp/outbox/claim":
 		var items []tsapp.Item
@@ -74,6 +88,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
 	case strings.HasSuffix(p, "/ack"):
+		if s.AckCode != 0 {
+			w.WriteHeader(s.AckCode)
+			return
+		}
 		if s.FailAck {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return

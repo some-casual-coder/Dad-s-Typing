@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -22,6 +23,8 @@ type Ingestor struct {
 	DownloadWait  time.Duration
 	// MaxAge drops replayed history older than this; zero disables.
 	MaxAge time.Duration
+	// Allowed, when non-nil, drops other senders before any download or write.
+	Allowed map[string]struct{}
 }
 
 // Redact keeps only the last 4 characters of an id for logs.
@@ -32,13 +35,23 @@ func Redact(s string) string {
 	return "…" + s[len(s)-4:]
 }
 
+func (g *Ingestor) drop(reason string) {
+	g.Log.Info("inbound dropped", "reason", reason)
+}
+
 // Ingest filters, downloads and persists a message; forwarding is separate.
 func (g *Ingestor) Ingest(ctx context.Context, m transport.Message) {
 	if reason := Filter(m); reason != "" {
-		g.Log.Info("inbound dropped", "reason", reason)
+		g.drop(reason)
 		return
 	}
-	if ok, err := g.Store.HasInbox(ctx, m.ID); err != nil {
+	if g.Allowed != nil {
+		if _, ok := g.Allowed[m.Sender]; !ok {
+			g.drop(DropNotAllowed)
+			return
+		}
+	}
+	if ok, err := g.Store.HasInbox(ctx, m.Sender, m.ID); err != nil {
 		g.Log.Error("inbox lookup failed", "err", "db")
 		return
 	} else if ok {
@@ -47,7 +60,7 @@ func (g *Ingestor) Ingest(ctx context.Context, m transport.Message) {
 	}
 	if g.MaxAge > 0 && !m.Timestamp.IsZero() &&
 		g.Now().Sub(m.Timestamp) > g.MaxAge {
-		g.Log.Info("inbound dropped", "reason", DropStale)
+		g.drop(DropStale)
 		return
 	}
 	row := store.InboxMsg{
@@ -59,14 +72,18 @@ func (g *Ingestor) Ingest(ctx context.Context, m transport.Message) {
 	}
 	if m.Kind == transport.KindImage {
 		data, err := g.download(ctx, m)
+		if errors.Is(err, transport.ErrTooLarge) {
+			g.drop(DropOversize)
+			return
+		}
 		if err != nil {
 			g.Log.Error("image download failed", "id", Redact(m.ID),
 				"err", "download")
 			return
 		}
-		mime := SniffImage(data)
-		if mime == "" || len(data) > MaxImageBytes {
-			g.Log.Info("inbound dropped", "reason", DropOversize+"_or_mime")
+		mime, ok := CheckImage(data)
+		if !ok {
+			g.drop(DropBadImage)
 			return
 		}
 		row.ImageMime = mime
@@ -82,12 +99,15 @@ func (g *Ingestor) Ingest(ctx context.Context, m transport.Message) {
 func (g *Ingestor) download(ctx context.Context, m transport.Message) ([]byte, error) {
 	var err error
 	for i := 0; i < g.DownloadTries; i++ {
-		var data []byte
 		dctx, cancel := context.WithTimeout(ctx, downloadTimeout)
-		data, err = m.Image(dctx)
+		var data []byte
+		data, err = m.Image(dctx, MaxImageBytes)
 		cancel()
 		if err == nil {
 			return data, nil
+		}
+		if errors.Is(err, transport.ErrTooLarge) {
+			return nil, err
 		}
 		select {
 		case <-ctx.Done():

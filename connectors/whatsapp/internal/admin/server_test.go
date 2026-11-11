@@ -15,17 +15,19 @@ const tok = "admin-token-admin-token-admin-token-00"
 
 type fakeCounts struct{}
 
-func (fakeCounts) Pending(context.Context) (int, int, error) { return 2, 1, nil }
+func (fakeCounts) Pending(context.Context) (int, int, int, error) { return 2, 1, 3, nil }
 
 func setup() (*Server, *transport.Fake, http.Handler) {
 	tr := transport.NewFake()
 	s := &Server{Token: tok, TR: tr, Counts: fakeCounts{},
-		LastEvent: func() time.Time { return time.Unix(1700000000, 0) }}
+		LastEvent: func() time.Time { return time.Unix(1700000000, 0) }, Port: "8091"}
 	return s, tr, s.Handler()
 }
 
 func do(h http.Handler, method, path, auth, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.RemoteAddr = "127.0.0.1:50000"
+	req.Host = "127.0.0.1:8091"
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
@@ -37,7 +39,7 @@ func do(h http.Handler, method, path, auth, body string) *httptest.ResponseRecor
 func TestAuthRequiredEverywhere(t *testing.T) {
 	_, _, h := setup()
 	routes := [][2]string{{"GET", "/healthz"}, {"GET", "/status"}, {"POST", "/pair"},
-		{"GET", "/pair/qr"}, {"POST", "/logout"}}
+		{"GET", "/pair/qr"}, {"POST", "/pair/qr"}, {"POST", "/logout"}}
 	for _, r := range routes {
 		for _, auth := range []string{"", "Bearer ", "Bearer wrong", tok, "Basic " + tok, "Bearer " + tok + "x"} {
 			if c := do(h, r[0], r[1], auth, "{}").Code; c != http.StatusUnauthorized {
@@ -66,7 +68,7 @@ func TestStatusAndRepairInstruction(t *testing.T) {
 	_, tr, h := setup()
 	body := do(h, "GET", "/status", "Bearer "+tok, "").Body.String()
 	for _, want := range []string{`"connected":true`, `"paired":true`, `"loggedOut":false`,
-		`"pendingInbox":2`, `"pendingOutbox":1`, `"lastEventAt":"2023-11-14T22:13:20Z"`} {
+		`"pendingInbox":2`, `"failedInbox":3`, `"pendingOutbox":1`, `"lastEventAt":"2023-11-14T22:13:20Z"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s in %s", want, body)
 		}
@@ -95,23 +97,58 @@ func TestPair(t *testing.T) {
 	}
 }
 
-func TestQRAndLogout(t *testing.T) {
+func TestQRStartIsPostOnlyAndGetIsReadOnly(t *testing.T) {
 	_, tr, h := setup()
-	if c := do(h, "GET", "/pair/qr", "Bearer "+tok, "").Code; c != 409 {
-		t.Fatalf("paired qr: %d", c)
+	if c := do(h, "POST", "/pair/qr", "Bearer "+tok, "").Code; c != 409 {
+		t.Fatalf("paired start: %d", c)
 	}
 	tr.SetState(transport.State{})
+	if c := do(h, "GET", "/pair/qr", "Bearer "+tok, "").Code; c != 404 {
+		t.Fatalf("get without qr: %d", c)
+	}
+	if c := do(h, "POST", "/pair/qr", "Bearer "+tok, "").Code; c != 202 {
+		t.Fatalf("start: %d", c)
+	}
 	tr.QRCode = "2@abc,def,ghi"
 	rec := do(h, "GET", "/pair/qr", "Bearer "+tok, "")
 	if rec.Code != 200 || rec.Body.Len() < 50 {
 		t.Fatalf("qr %d len %d", rec.Code, rec.Body.Len())
 	}
-	tr.SetState(transport.State{Connected: true, Paired: true})
+}
+
+func TestLogout(t *testing.T) {
+	_, tr, h := setup()
 	if c := do(h, "POST", "/logout", "Bearer "+tok, "").Code; c != 200 {
 		t.Fatalf("logout %d", c)
 	}
 	if !tr.State().Halted {
 		t.Fatal("not halted after logout")
+	}
+}
+
+func TestRemoteAndHostChecks(t *testing.T) {
+	_, _, h := setup()
+	cases := []struct {
+		remote, host string
+		want         int
+	}{
+		{"127.0.0.1:1", "127.0.0.1:8091", 200},
+		{"127.0.0.1:1", "localhost:8091", 200},
+		{"[::1]:1", "[::1]:8091", 200},
+		{"10.0.0.5:1", "127.0.0.1:8091", 403},
+		{"127.0.0.1:1", "evil.example.com:8091", 403},
+		{"127.0.0.1:1", "127.0.0.1:9999", 403},
+		{"127.0.0.1:1", "127.0.0.1", 403},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("GET", "/status", nil)
+		req.RemoteAddr, req.Host = c.remote, c.host
+		req.Header.Set("Authorization", "Bearer "+tok)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("%s %s: %d want %d", c.remote, c.host, rec.Code, c.want)
+		}
 	}
 }
 

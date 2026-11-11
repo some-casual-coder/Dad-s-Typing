@@ -30,24 +30,26 @@ func IsPermanent(err error) bool {
 		return false
 	}
 	switch se.Code {
-	case 400, 404, 413, 422:
+	case 400, 413, 422:
 		return true
 	}
 	return false
 }
 
 type Client struct {
-	base   string
-	secret string
-	http   *http.Client
-	now    func() time.Time
+	base    string
+	secret  string
+	channel string
+	http    *http.Client
+	now     func() time.Time
 }
 
-func New(base, secret string) *Client {
+func New(base, secret, channel string) *Client {
 	return &Client{
-		base:   base,
-		secret: secret,
-		now:    time.Now,
+		base:    base,
+		secret:  secret,
+		channel: channel,
+		now:     time.Now,
 		http: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -55,6 +57,10 @@ func New(base, secret string) *Client {
 			},
 		},
 	}
+}
+
+func (c *Client) path(rest string) string {
+	return "/api/channel/" + c.channel + "/" + rest
 }
 
 func (c *Client) post(ctx context.Context, path string, in, out any) error {
@@ -118,7 +124,7 @@ func (c *Client) Inbound(ctx context.Context, p InboundPayload) (string, error) 
 	var out struct {
 		Status string `json:"status"`
 	}
-	err := c.post(ctx, "/api/channel/whatsapp/inbound", p, &out)
+	err := c.post(ctx, c.path("inbound"), p, &out)
 	return out.Status, err
 }
 
@@ -133,7 +139,7 @@ func (c *Client) Claim(ctx context.Context, limit, lease int) ([]Item, error) {
 	var out struct {
 		Items []Item `json:"items"`
 	}
-	err := c.post(ctx, "/api/channel/whatsapp/outbox/claim",
+	err := c.post(ctx, c.path("outbox/claim"),
 		map[string]int{"limit": limit, "leaseSeconds": lease}, &out)
 	return out.Items, err
 }
@@ -145,17 +151,18 @@ type Ack struct {
 }
 
 func (c *Client) Ack(ctx context.Context, id string, a Ack) error {
-	return c.post(ctx, "/api/channel/whatsapp/outbox/"+id+"/ack", a, nil)
+	return c.post(ctx, c.path("outbox/"+id+"/ack"), a, nil)
 }
 
 type Health struct {
 	Connected bool   `json:"connected"`
 	Paired    bool   `json:"paired"`
 	LoggedOut bool   `json:"loggedOut"`
+	Degraded  bool   `json:"degraded,omitempty"`
 	Version   string `json:"version"`
 	At        string `json:"at"`
 }
 
 func (c *Client) Health(ctx context.Context, h Health) error {
-	return c.post(ctx, "/api/channel/whatsapp/health", h, nil)
+	return c.post(ctx, c.path("health"), h, nil)
 }

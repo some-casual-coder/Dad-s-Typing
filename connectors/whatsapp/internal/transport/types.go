@@ -11,6 +11,8 @@ var (
 	ErrNotReady = errors.New("transport not ready")
 	// ErrRejected means the send was refused locally and can never succeed.
 	ErrRejected = errors.New("send rejected before dispatch")
+	// ErrTooLarge means media exceeded the size cap while downloading.
+	ErrTooLarge = errors.New("media exceeds size cap")
 )
 
 type Kind int
@@ -34,7 +36,8 @@ type Message struct {
 	Kind      Kind
 	Text      string
 	ImageSize int64
-	Image     func(ctx context.Context) ([]byte, error)
+	// Image downloads the media, failing with ErrTooLarge past max bytes.
+	Image     func(ctx context.Context, max int64) ([]byte, error)
 	Timestamp time.Time
 }
 

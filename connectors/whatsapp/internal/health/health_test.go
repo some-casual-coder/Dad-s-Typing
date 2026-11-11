@@ -17,10 +17,10 @@ func TestReportsOnStartAndOnChange(t *testing.T) {
 	defer ts.Close()
 	tr := transport.NewFake()
 	r := &Reporter{
-		Post: tsapp.New(ts.URL, tstest.Secret), State: tr.State, Version: "t",
+		Post: tsapp.New(ts.URL, tstest.Secret, "whatsapp"), State: tr.State, Version: "t",
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Now:   func() time.Time { return time.Unix(1700000000, 0) },
-		Every: time.Hour,
+		Every: time.Hour, Degraded: func(context.Context) bool { return true },
 	}
 	r.Init()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -49,6 +49,9 @@ func TestReportsOnStartAndOnChange(t *testing.T) {
 	ts.Lock()
 	defer ts.Unlock()
 	a, b := ts.Healths[0], ts.Healths[1]
+	if !a.Degraded {
+		t.Fatal("degraded flag missing")
+	}
 	if !a.Connected || !a.Paired || a.LoggedOut || a.At != "2023-11-14T22:13:20Z" {
 		t.Fatalf("first %+v", a)
 	}

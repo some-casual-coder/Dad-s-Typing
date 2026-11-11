@@ -27,6 +27,7 @@ type rig struct {
 	ts     *tstest.Server
 	tr     *transport.Fake
 	sleeps []time.Duration
+	skew   time.Duration
 }
 
 func newRig(t *testing.T) *rig {
@@ -34,7 +35,17 @@ func newRig(t *testing.T) *rig {
 	r := &rig{dir: t.TempDir(), ts: tstest.New(), tr: transport.NewFake()}
 	t.Cleanup(r.ts.Close)
 	r.reopen(t)
+	r.know("254700000001")
 	return r
+}
+
+func (r *rig) know(num string) {
+	_, err := r.st.InsertInbox(context.Background(), store.InboxMsg{
+		ProviderID: "seed" + num, Sender: num, Text: "x", ReceivedAt: time.Now(),
+	}, time.Now())
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (r *rig) reopen(t *testing.T) {
@@ -52,16 +63,19 @@ func (r *rig) reopen(t *testing.T) {
 // worker builds a fresh worker over the same store, like a process restart.
 func (r *rig) worker() *Worker {
 	return &Worker{
-		Store: r.st, TS: tsapp.New(r.ts.URL, tstest.Secret), TR: r.tr,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now,
+		Store: r.st, TS: tsapp.New(r.ts.URL, tstest.Secret, "whatsapp"), TR: r.tr,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Now: func() time.Time { return time.Now().Add(r.skew) },
 		Sleep: func(_ context.Context, d time.Duration) error {
 			r.sleeps = append(r.sleeps, d)
+			r.skew += d
 			return nil
 		},
-		ClaimLimit: 5, LeaseSeconds: 120, PollEvery: time.Second,
+		ClaimLimit: 5, LeaseSeconds: 300, PollEvery: time.Second,
 		MinDelay: 3 * time.Second, Jitter: time.Second,
 		RecipientCap: 3, RecipientSpan: time.Hour,
-		AckTries: 2, AckBackoff: time.Millisecond, SendTimeout: time.Second,
+		AckBackoff: time.Second, AckMaxBackoff: time.Hour,
+		SendTimeout: time.Second, RecordTimeout: time.Second,
 	}
 }
 
@@ -239,5 +253,113 @@ func TestInvalidItemsSkipped(t *testing.T) {
 	}
 	if a := r.acks(id1); len(a) != 1 || a[0].State != "failed" {
 		t.Fatalf("acks %v", a)
+	}
+}
+
+func TestUnknownRecipientRefused(t *testing.T) {
+	r := newRig(t)
+	r.ts.Lock()
+	r.ts.Queue = []tsapp.Item{{ID: id1, Recipient: "254799999999", Body: "x"}}
+	r.ts.Unlock()
+	r.worker().Poll(context.Background())
+	if len(r.tr.Sent()) != 0 {
+		t.Fatal("messaged a number that never wrote in")
+	}
+	if a := r.acks(id1); len(a) != 1 || a[0].State != "failed" || a[0].Error != "unknown_recipient" {
+		t.Fatalf("acks %v", a)
+	}
+}
+
+func TestCancelDuringSendStillRecordsAndAcks(t *testing.T) {
+	r := newRig(t)
+	r.queue(id1)
+	ctx, cancel := context.WithCancel(context.Background())
+	r.tr.SendErr = func(int) error { cancel(); return nil }
+	r.worker().Poll(ctx)
+	l, err := r.st.GetLedger(context.Background(), id1)
+	if err != nil || l == nil || l.State != store.LedgerSent || !l.Acked {
+		t.Fatalf("ledger %+v err %v", l, err)
+	}
+	if a := r.acks(id1); len(a) != 1 || a[0].State != "sent" {
+		t.Fatalf("acks %v", a)
+	}
+}
+
+func TestLedgerWriteFailureAfterSendAcksUnknown(t *testing.T) {
+	r := newRig(t)
+	r.queue(id1)
+	r.tr.SendErr = func(int) error {
+		_ = r.st.Close()
+		return nil
+	}
+	r.worker().Poll(context.Background())
+	if len(r.tr.Sent()) != 1 {
+		t.Fatal("setup: send did not happen")
+	}
+	a := r.acks(id1)
+	if len(a) != 1 || a[0].State != "unknown" || a[0].Error != "ledger_error" {
+		t.Fatalf("acks %v", a)
+	}
+}
+
+func TestAck404KeepsLedgerAndRetriesWithBackoff(t *testing.T) {
+	r := newRig(t)
+	r.queue(id1)
+	r.ts.AckCode = 404
+	w := r.worker()
+	w.Poll(context.Background())
+	r.ts.Lock()
+	r.ts.Queue = nil
+	r.ts.Unlock()
+	ctx := context.Background()
+	l, _ := r.st.GetLedger(ctx, id1)
+	if l == nil || l.Acked || l.AckAttempts != 1 {
+		t.Fatalf("ledger %+v", l)
+	}
+	if n, _ := r.st.PendingAcks(ctx); n != 1 {
+		t.Fatalf("pending acks %d", n)
+	}
+	// Not due yet: no second attempt without time passing.
+	w.Poll(ctx)
+	if l, _ = r.st.GetLedger(ctx, id1); l.AckAttempts != 1 {
+		t.Fatalf("retried too early: %d", l.AckAttempts)
+	}
+	r.skew += 10 * time.Second
+	w.Poll(ctx)
+	if l, _ = r.st.GetLedger(ctx, id1); l.AckAttempts != 2 {
+		t.Fatalf("attempts %d", l.AckAttempts)
+	}
+	// Backoff is capped and the app recovering finally settles it.
+	r.ts.Lock()
+	r.ts.AckCode = 0
+	r.ts.Unlock()
+	r.skew += 2 * time.Hour
+	w.Poll(ctx)
+	if a := r.acks(id1); len(a) != 1 || a[0].State != "sent" {
+		t.Fatalf("acks %v", a)
+	}
+	if n, _ := r.st.PendingAcks(ctx); n != 0 {
+		t.Fatalf("pending acks %d", n)
+	}
+	if len(r.tr.Sent()) != 1 {
+		t.Fatal("resent")
+	}
+}
+
+func TestLeaseBudgetStopsBatch(t *testing.T) {
+	r := newRig(t)
+	r.queue(id1, id2, id3)
+	w := r.worker()
+	w.LeaseSeconds = 6
+	w.Poll(context.Background())
+	// The second send fits (pace under 4s + 1s send); the third cannot.
+	if got := len(r.tr.Sent()); got != 2 {
+		t.Fatalf("sent %d, want 2", got)
+	}
+	if len(r.acks(id3)) != 0 {
+		t.Fatal("acked an item that was left for lease expiry")
+	}
+	if l, _ := r.st.GetLedger(context.Background(), id3); l != nil {
+		t.Fatal("ledger row for unsent item")
 	}
 }

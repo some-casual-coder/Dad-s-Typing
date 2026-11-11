@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -20,7 +21,7 @@ const RepairInstruction = "WhatsApp session is not usable. Run POST /pair " +
 	"Settings > Linked devices > Link a device to complete pairing."
 
 type Counts interface {
-	Pending(ctx context.Context) (inbox, outbox int, err error)
+	Pending(ctx context.Context) (inbox, outbox, failed int, err error)
 }
 
 type Server struct {
@@ -29,6 +30,8 @@ type Server struct {
 	Counts    Counts
 	LastEvent func() time.Time
 	Notify    func()
+	// Port is the configured admin port; Host headers must carry it.
+	Port string
 }
 
 type Status struct {
@@ -38,6 +41,7 @@ type Status struct {
 	Reason        string `json:"reason,omitempty"`
 	PendingInbox  int    `json:"pendingInbox"`
 	PendingOutbox int    `json:"pendingOutbox"`
+	FailedInbox   int    `json:"failedInbox"`
 	LastEventAt   string `json:"lastEventAt"`
 	Instruction   string `json:"instruction,omitempty"`
 }
@@ -49,9 +53,35 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("POST /pair", s.pair)
+	mux.HandleFunc("POST /pair/qr", s.startQR)
 	mux.HandleFunc("GET /pair/qr", s.qr)
 	mux.HandleFunc("POST /logout", s.logout)
-	return s.auth(mux)
+	return s.local(s.auth(mux))
+}
+
+// local rejects non-loopback peers and unexpected Host headers.
+func (s *Server) local(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		ip := net.ParseIP(host)
+		if err != nil || ip == nil || !ip.IsLoopback() || !s.hostOK(r.Host) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) hostOK(h string) bool {
+	host, port, err := net.SplitHostPort(h)
+	if err != nil || port != s.Port {
+		return false
+	}
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -79,14 +109,14 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	st := s.TR.State()
-	in, out, err := s.Counts.Pending(r.Context())
+	in, out, failed, err := s.Counts.Pending(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db"})
 		return
 	}
 	res := Status{
 		Connected: st.Connected, Paired: st.Paired, LoggedOut: st.Halted,
-		Reason: st.Reason, PendingInbox: in, PendingOutbox: out,
+		Reason: st.Reason, PendingInbox: in, PendingOutbox: out, FailedInbox: failed,
 	}
 	if t := s.LastEvent(); !t.IsZero() {
 		res.LastEventAt = t.UTC().Format(time.RFC3339)
@@ -125,8 +155,9 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"code": code})
 }
 
-func (s *Server) qr(w http.ResponseWriter, r *http.Request) {
-	if s.TR.State().Paired && !s.TR.State().Halted {
+func (s *Server) startQR(w http.ResponseWriter, r *http.Request) {
+	st := s.TR.State()
+	if st.Paired && !st.Halted {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "already_paired"})
 		return
 	}
@@ -134,17 +165,12 @@ func (s *Server) qr(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "qr_failed"})
 		return
 	}
-	// The first code arrives shortly after the channel opens.
-	var code string
-	for i := 0; i < 50 && code == ""; i++ {
-		if code = s.TR.QR(); code == "" {
-			select {
-			case <-r.Context().Done():
-				return
-			case <-time.After(100 * time.Millisecond):
-			}
-		}
-	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// qr is read-only: it renders the current code, if pairing is under way.
+func (s *Server) qr(w http.ResponseWriter, _ *http.Request) {
+	code := s.TR.QR()
 	if code == "" {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no_qr_yet"})
 		return

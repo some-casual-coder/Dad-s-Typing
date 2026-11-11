@@ -2,7 +2,12 @@ package inbound
 
 import (
 	"bytes"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"unicode/utf8"
+
+	_ "golang.org/x/image/webp"
 
 	"github.com/dadstyping/whatsapp-connector/internal/transport"
 )
@@ -15,15 +20,18 @@ const (
 
 // Drop reasons are stable codes safe to log.
 const (
-	DropGroup    = "group"
-	DropServer   = "non_direct_chat"
-	DropSelf     = "from_self"
-	DropKind     = "unsupported_kind"
-	DropOversize = "oversize"
-	DropNoSender = "no_sender"
-	DropBadID    = "bad_id"
-	DropEmpty    = "empty"
-	DropStale    = "stale"
+	DropGroup      = "group"
+	DropServer     = "non_direct_chat"
+	DropSelf       = "from_self"
+	DropKind       = "unsupported_kind"
+	DropOversize   = "oversize"
+	DropNoSender   = "no_sender"
+	DropBadID      = "bad_id"
+	DropEmpty      = "empty"
+	DropStale      = "stale"
+	DropBadSize    = "bad_size"
+	DropBadImage   = "bad_image"
+	DropNotAllowed = "not_allowed"
 )
 
 // Filter returns "" when the message may be forwarded, else a drop reason.
@@ -46,7 +54,10 @@ func Filter(m transport.Message) string {
 			return DropEmpty
 		}
 	case transport.KindImage:
-		if m.ImageSize > MaxImageBytes || m.Image == nil {
+		if m.ImageSize <= 0 || m.Image == nil {
+			return DropBadSize
+		}
+		if m.ImageSize > MaxImageBytes {
 			return DropOversize
 		}
 	default:
@@ -82,4 +93,26 @@ func SniffImage(b []byte) string {
 		return "image/webp"
 	}
 	return ""
+}
+
+const (
+	maxDim    = 12000
+	maxPixels = 40_000_000
+)
+
+// CheckImage validates magic bytes and decoded header dimensions.
+func CheckImage(b []byte) (string, bool) {
+	mime := SniffImage(b)
+	if mime == "" {
+		return "", false
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(b))
+	if err != nil || "image/"+format != mime {
+		return "", false
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxDim ||
+		cfg.Height > maxDim || cfg.Width*cfg.Height > maxPixels {
+		return "", false
+	}
+	return mime, true
 }
