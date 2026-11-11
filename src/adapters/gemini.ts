@@ -20,7 +20,8 @@ Rules:
 - Set essential true only when the buyer clearly said must, need or essential. Liking something is not essential.
 - quote is the exact buyer words that support the requirement. For image-only observations use an empty quote and essential false.
 - If something is unclear, set clarification to one short question, else null.
-- reply is one or two friendly sentences for the buyer.`;
+- reply is one or two friendly sentences for the buyer.
+- item is the product the buyer wants in 1 to 4 words (for example "cat carrier"), or an empty string when unclear.`;
 
 export const SCHEMA = {
   type: "OBJECT",
@@ -43,6 +44,7 @@ export const SCHEMA = {
     },
     clarification: { type: "STRING", nullable: true },
     reply: { type: "STRING" },
+    item: { type: "STRING" },
   },
   required: ["observations", "proposedRequirements", "clarification", "reply"],
 };
@@ -75,6 +77,13 @@ function requirement(raw: unknown, userText: string): ProposedRequirement {
   return { key, op, value, essential, quote };
 }
 
+// A product noun phrase only: letters, digits, spaces and hyphens, never a link
+function cleanItem(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const s = v.replace(/[^\p{L}\p{N} -]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+  return s.length >= 3 ? s : undefined;
+}
+
 export function validateInterpretation(raw: unknown, userText = ""): Interpretation {
   if (!isObj(raw)) throw bad("not an object");
   if (!Array.isArray(raw.proposedRequirements) || raw.proposedRequirements.length > 8) throw bad("requirements");
@@ -88,6 +97,7 @@ export function validateInterpretation(raw: unknown, userText = ""): Interpretat
     proposedRequirements: raw.proposedRequirements.map((r) => requirement(r, userText)),
     clarification: typeof raw.clarification === "string" && raw.clarification.trim() ? raw.clarification.slice(0, 300) : null,
     reply: typeof raw.reply === "string" ? raw.reply.slice(0, 600) : "",
+    item: cleanItem(raw.item),
   };
 }
 

@@ -8,6 +8,7 @@ import { listOpenAttempts } from "@/domain/payments";
 import { reconcileOpenAttempts } from "@/payments/reconcile";
 
 const interpret = vi.fn();
+const seedExternal = vi.fn<(...a: unknown[]) => Promise<void>>(async () => { throw new Error("channel3 down"); });
 const payments = { createOrder: vi.fn(), capture: vi.fn(), getOrder: vi.fn(), refundCapture: vi.fn(), getRefund: vi.fn(), getCapture: vi.fn(), verifyWebhook: vi.fn() };
 
 vi.mock("@/adapters", async () => ({
@@ -20,7 +21,7 @@ vi.mock("@/catalog/demo", async () => ({
     const { recordOffers } = await import("@/domain/tasks");
     await recordOffers(taskId, [{ source: "demo", sourceOfferId: "TOP-1", route: "paypal", seller: "Demo Store", merchantId: "M1", sku: "TOP-1", title: "Carrier", unitPriceMinor: 3599, shippingMinor: 800, currency: "USD", availability: "InStock" }]);
   },
-  seedExternalOffers: async () => { throw new Error("channel3 down"); },
+  seedExternalOffers: (...a: unknown[]) => seedExternal(...a),
 }));
 
 import { POST as createTask } from "@/app/api/tasks/route";
@@ -279,5 +280,37 @@ describe("review fixes", () => {
       expect((await call(postMsg, "POST", "", "x".repeat(31) + (i % 10), { clientMessageId: `j${i}`, text: "x" }, s.p)).status).toBe(404);
     }
     expect((await call(postMsg, "POST", "", s.mum, { clientMessageId: "real", text: "hi" }, s.p)).status).toBe(200);
+  });
+});
+
+describe("proposals, item search and ranking", () => {
+  const proposal = { key: "opening", op: "eq", value: "top", essential: true, quote: "it must open from the top" };
+
+  it("an unconfirmed proposal survives a reload and disappears once confirmed", async () => {
+    const s = await setup();
+    interpret.mockResolvedValue({ observations: [], proposedRequirements: [proposal], clarification: null, reply: "ok" });
+    const first = await call(postMsg, "POST", "", s.mum, { clientMessageId: "p1", text: "it must open from the top" }, s.p);
+    expect(first.json.proposals).toHaveLength(1);
+    const later = await call(listMsgs, "GET", "", s.mum, undefined, s.p);
+    expect(later.json.proposals).toMatchObject([{ key: "opening", value: "top" }]);
+    expect((await call(listMsgs, "GET", "", s.nathan, undefined, s.p)).status).toBe(403);
+    await call(postReq, "POST", "", s.mum, { key: "opening", op: "eq", value: "top", essential: true }, s.p);
+    expect((await call(listMsgs, "GET", "", s.mum, undefined, s.p)).json.proposals).toEqual([]);
+  });
+
+  it("the item the AI names seeds external offers once, without delaying the reply", async () => {
+    const s = await setup();
+    seedExternal.mockReset().mockImplementation(async () => {});
+    interpret.mockResolvedValue({ observations: [], proposedRequirements: [], clarification: null, reply: "ok", item: "cat carrier" });
+    await call(postMsg, "POST", "", s.mum, { clientMessageId: "i1", text: "a carrier like this" }, s.p);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(seedExternal).toHaveBeenCalledWith(s.id, "cat carrier");
+    seedExternal.mockImplementation(async () => { throw new Error("channel3 down"); });
+  });
+
+  it("a photo start skips title-based external seeding", async () => {
+    seedExternal.mockClear();
+    await call(createTask, "POST", "/api/tasks", null, { title: "For Mum", starterRoles: ["helper", "payer"], seedExternal: false });
+    expect(seedExternal).not.toHaveBeenCalled();
   });
 });

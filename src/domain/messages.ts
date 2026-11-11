@@ -64,3 +64,16 @@ export async function getExchange(taskId: string, token: string, exchangeKey: st
     };
   });
 }
+
+// Proposals from this grant's latest exchange that are not yet confirmed
+export async function pendingProposals(taskId: string, token: string) {
+  return tx(async (c) => {
+    const g = await authorize(c, taskId, token, "message");
+    const last = (await c.query(
+      `SELECT result FROM idempotency WHERE scope=$1 AND key LIKE $2 AND result IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+      [`msg:${taskId}`, `${g.id}:%`],
+    )).rows[0]?.result as { proposals?: { key: string; op: string; value: string | number }[] } | undefined;
+    const confirmed = (await c.query(`SELECT key, op, value FROM requirements WHERE task_id=$1 AND status='confirmed' AND superseded_at IS NULL`, [taskId])).rows;
+    return (last?.proposals ?? []).filter((p) => !confirmed.some((r) => r.key === p.key && r.op === p.op && String(r.value) === String(p.value)));
+  });
+}

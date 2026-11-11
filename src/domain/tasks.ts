@@ -164,7 +164,8 @@ export async function getComparison(taskId: string, token: string) {
       };
     });
     const rank = { eligible: 0, unchecked: 0, unresolved: 1, ineligible: 2 } as const;
-    offers.sort((a, b) => rank[a.status as keyof typeof rank] - rank[b.status as keyof typeof rank]);
+    const pay = (r: string) => (r === "paypal" ? 0 : 1);
+    offers.sort((a, b) => rank[a.status as keyof typeof rank] - rank[b.status as keyof typeof rank] || pay(a.route) - pay(b.route));
     return { version: t.version as number, requirements: reqs, offers };
   });
 }

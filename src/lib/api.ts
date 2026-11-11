@@ -77,7 +77,7 @@ async function call<T>(
 const t = (id: string) => `/api/tasks/${encodeURIComponent(id)}`;
 
 export const api = {
-  createTask: (body: { title: string; starterRoles: Role[]; label?: string }) =>
+  createTask: (body: { title: string; starterRoles: Role[]; label?: string; seedExternal?: boolean }) =>
     call<{ taskId: string; token: string }>("POST", "/api/tasks", { body }),
   transcribe: (id: string, token: string, audio: Blob, signal?: AbortSignal) => {
     const body = new FormData();
@@ -87,7 +87,7 @@ export const api = {
   getTask: (id: string, token: string) => call<TaskView>("GET", t(id), { token }),
   getComparison: (id: string, token: string) => call<Comparison>("GET", `${t(id)}/comparison`, { token }),
   getMessages: (id: string, token: string) =>
-    call<{ messages: ChatMessage[] }>("GET", `${t(id)}/messages`, { token }),
+    call<{ messages: ChatMessage[]; proposals: Proposal[] }>("GET", `${t(id)}/messages`, { token }),
   sendMessage: (id: string, token: string, body: {
     clientMessageId: string; text?: string; imageBase64?: string; mime?: string;
   }) => call<SendResult>("POST", `${t(id)}/messages`, { token, body }),

@@ -6,7 +6,7 @@ import Comparison from "./Comparison";
 import PayerPanel from "./PayerPanel";
 import ShareInvite from "./ShareInvite";
 import {
-  api, ApiError, type ChatMessage, type Comparison as Cmp, type Offer, type TaskView as View,
+  api, ApiError, type ChatMessage, type Comparison as Cmp, type Offer, type Proposal, type TaskView as View,
 } from "@/lib/api";
 import { canDo, formatMoney, nextActionCopy, requirementLabel } from "@/lib/format";
 import { useTaskToken } from "@/lib/useToken";
@@ -18,6 +18,7 @@ export default function TaskPage({ taskId }: { taskId: string }) {
   const [view, setView] = useState<View | null>(null);
   const [cmp, setCmp] = useState<Cmp | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [serverProposals, setServerProposals] = useState<Proposal[]>([]);
   const [invalid, setInvalid] = useState(false);
   const [offline, setOffline] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -37,7 +38,10 @@ export default function TaskPage({ taskId }: { taskId: string }) {
       setView(v); setInvalid(false);
       const [c, m] = await Promise.allSettled([api.getComparison(taskId, token), api.getMessages(taskId, token)]);
       if (c.status === "fulfilled") setCmp(c.value);
-      if (m.status === "fulfilled") setMessages((old) => mergeMsgs(old, m.value.messages));
+      if (m.status === "fulfilled") {
+        setMessages((old) => mergeMsgs(old, m.value.messages));
+        setServerProposals(m.value.proposals ?? []);
+      }
       failures.current = 0; setOffline(false);
     } catch (e) {
       if (e instanceof ApiError && [401, 403, 404].includes(e.status)) setInvalid(true);
@@ -148,7 +152,7 @@ export default function TaskPage({ taskId }: { taskId: string }) {
         </section>
       )}
 
-      <Chat taskId={taskId} token={token} messages={messages} canSend={canDo(roles, "message")}
+      <Chat taskId={taskId} token={token} messages={messages} serverProposals={serverProposals} canSend={canDo(roles, "message")}
         canConfirm={canDo(roles, "confirm_requirement")} onChanged={load}
         onSent={(m) => setMessages((old) => mergeMsgs(old, m))} />
 
@@ -182,6 +186,10 @@ export default function TaskPage({ taskId }: { taskId: string }) {
       {canDo(roles, "invite") && (
         <section className="card stack" aria-labelledby="ask-h">
           <h2 id="ask-h">Ask someone</h2>
+          {!canDo(roles, "choose") && (
+            <ShareInvite taskId={taskId} token={token} roles={["requester", "chooser"]} label="Mum"
+              buttonText="Send to Mum" hint="Mum can ask questions, correct details and choose herself." />
+          )}
           <ShareInvite taskId={taskId} token={token} roles={["helper"]} label="Helper"
             buttonText="Make a helper link" hint="A helper can chat and suggest details, but cannot choose or pay." />
           <ShareInvite taskId={taskId} token={token} roles={["payer"]} label="Payer"

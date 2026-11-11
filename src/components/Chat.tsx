@@ -10,6 +10,7 @@ interface Props {
   taskId: string;
   token: string;
   messages: ChatMessage[];
+  serverProposals?: Proposal[];
   canSend: boolean;
   canConfirm: boolean;
   onChanged: () => void;
@@ -23,7 +24,7 @@ const readBase64 = (f: File) => new Promise<string>((res, rej) => {
   r.readAsDataURL(f);
 });
 
-export default function Chat({ taskId, token, messages, canSend, canConfirm, onChanged, onSent }: Props) {
+export default function Chat({ taskId, token, messages, serverProposals = [], canSend, canConfirm, onChanged, onSent }: Props) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [alt, setAlt] = useState("");
@@ -36,6 +37,14 @@ export default function Chat({ taskId, token, messages, canSend, canConfirm, onC
   const [draft, setDraft] = useState({ value: "", essential: true });
   const clientId = useRef(newId());
   const listRef = useRef<HTMLOListElement>(null);
+
+  // proposals handled here are not offered again by a slightly older poll
+  const handled = useRef(new Set<string>());
+  const proposalKey = (p: Proposal) => `${p.key}|${p.op}|${p.value}`;
+  useEffect(() => {
+    const fresh = serverProposals.filter((p) => !handled.current.has(proposalKey(p)));
+    if (fresh.length) setProposals((cur) => (cur.length ? cur : fresh));
+  }, [serverProposals]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -73,6 +82,7 @@ export default function Chat({ taskId, token, messages, canSend, canConfirm, onC
       });
       if (r.status !== "confirmed" && canConfirm) await api.confirmRequirement(taskId, token, r.requirementId);
       setInfo(r.status === "confirmed" || canConfirm ? "Saved. Options were rechecked." : "Sent. Mum needs to confirm it.");
+      handled.current.add(proposalKey(p));
       setProposals((x) => x.filter((_, j) => j !== i));
       setEditing(null);
       onChanged();

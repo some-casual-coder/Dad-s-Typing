@@ -17,6 +17,8 @@ export interface Interpretation {
   proposedRequirements: ProposedRequirement[];
   clarification: string | null;
   reply: string;
+  // short product name for catalogue search, when the buyer's item is clear
+  item?: string;
 }
 
 export interface InterpretInput {

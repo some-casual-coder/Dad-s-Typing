@@ -3,6 +3,8 @@ import { AdapterError, type Interpretation } from "@/adapters/types";
 import { DomainError } from "@/domain/errors";
 import { getExchange, recordAssistantMessage } from "@/domain/messages";
 import { addMessage, getComparison } from "@/domain/tasks";
+import { seedExternalOffers } from "@/catalog/demo";
+import { hasExternalOffers } from "@/domain/offers";
 
 export const FALLBACK = "I could not read that, please describe it.";
 
@@ -46,5 +48,8 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   const clarification = result?.clarification ? scrubModelText(result.clarification) || null : null;
   const reply = (scrubModelText(result?.reply ?? "") || FALLBACK).slice(0, 2000);
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
+  const item = result?.item;
+  // the next poll picks the offers up; the reply never waits on the catalogue
+  if (item) void hasExternalOffers(taskId).then((has) => (has ? undefined : seedExternalOffers(taskId, item))).catch(() => console.error("channel_error", "seed_external"));
   return getExchange(taskId, token, input.key, input.channel);
 }

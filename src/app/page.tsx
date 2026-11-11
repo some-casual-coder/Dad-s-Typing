@@ -26,7 +26,7 @@ export default function Home() {
     setBusy(true); setErr("");
     try {
       if (!task.current) {
-        const r = await api.createTask({ title: title.trim() || "Something for Mum", starterRoles: ["helper", "payer"] });
+        const r = await api.createTask({ title: title.trim() || note.trim().slice(0, 80) || "Photo request", starterRoles: ["helper", "payer"], seedExternal: false });
         storeToken(r.taskId, r.token);
         task.current = r;
       }
@@ -89,6 +89,12 @@ export default function Home() {
             <div className="stack photo-start" role="group" aria-label="Start from a photo">
               <PhotoPicker file={photo} alt={alt} disabled={busy} label="Upload photo"
                 onFile={(f) => { setPhoto(f); msgId.current = ""; }} onAlt={setAlt} onError={setErr} />
+              {!photo && (
+                <p className="muted small">
+                  No photo handy? <a href="/demo/carrier-sample.png" download>Download a sample photo</a> (a synthetic
+                  drawing made for this demo) and upload it here.
+                </p>
+              )}
               {photo && (
                 <>
                   <label className="field"><span>Add a note (optional)</span>
