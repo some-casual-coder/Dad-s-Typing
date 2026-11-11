@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Dad's Typing...
 
-## Getting Started
+A shared buying task for families. Someone describes what they need, the assistant asks
+what matters, checks exact options, and the person it is for chooses. A designated payer
+then approves the exact item and total in PayPal (Sandbox), and everyone sees a receipt
+tied to the same task.
 
-First, run the development server:
+**Status:** a working browser journey against PayPal Sandbox. Not a production service.
+
+## What is real and what is not
+
+| Part | State |
+|---|---|
+| Checkout | Real PayPal **Sandbox** order, approved by a sandbox buyer and captured by the server. No real money moves. |
+| AI | Real model calls (Gemini through Google or OpenRouter) that propose requirements. The person confirms them; the model cannot choose, pay or change roles. |
+| Offers | A clearly labelled **demo seller** ("Whisker & Co (demo)") is the only payable seller. Channel3 results (US/GB) appear as external "View at retailer" links and are never payable here. |
+| Chat | A browser simulation. It is **not** WhatsApp. WhatsApp is a separate later adapter. |
+| Not built yet | Voice, webhooks (needs a public HTTPS URL), refunds, WhatsApp. |
+
+## Run it locally
+
+Prerequisites: Node 22+, npm, Docker (for Postgres).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local        # then fill in the values below
+docker run -d --name dads-typing-pg -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_USER=dt -e POSTGRES_PASSWORD=<choose> -e POSTGRES_DB=dads_typing \
+  postgres:16-alpine
+# set DATABASE_URL=postgres://dt:<choose>@127.0.0.1:5433/dads_typing
+npm run db:migrate
+npm run build && npm start        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Environment variables (names only; see `.env.example`):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `PAYPAL_ENV=sandbox`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MERCHANT_ID`
+  (the Business sandbox account's merchant id), optional `PAYPAL_WEBHOOK_ID`.
+- One AI provider: `GEMINI_API_KEY` + `GEMINI_MODEL`, or `INTERPRETER_PROVIDER=openrouter`
+  with `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`.
+- `CHANNEL3_API_KEY` (optional; without it only demo offers appear).
+- `APP_BASE_URL` (PayPal returns here), `DATABASE_URL`, `TRUST_PROXY=1` only behind a trusted proxy.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The server refuses to start PayPal unless `PAYPAL_ENV=sandbox`.
 
-## Learn More
+## Try the journey
 
-To learn more about Next.js, take a look at the following resources:
+1. Open `/`, enter a request, and choose **Start for Mum** (you help and pay).
+2. **Send to Mum** makes a private link. Open it in a different browser profile.
+3. As Mum, say something like "it must open from the top and be at least 45 cm long".
+   Confirm the proposed requirements; the shortlist changes.
+4. Mum chooses an option. You (the payer) review the exact item and total, then
+   **Pay with PayPal (sandbox)** and sign in with a PayPal **Personal sandbox** buyer
+   (create one under Testing Tools > Sandbox Accounts in the PayPal developer dashboard).
+5. The server captures and verifies the payment; both views show the receipt.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Cancelling at PayPal leaves no receipt and the payment can be retried.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Checks
 
-## Deploy on Vercel
+```bash
+npm run typecheck   # next typegen + tsc
+npm run lint
+npm test            # deterministic tests against a separate *_test database
+npm run live:providers   # real calls: AI, Channel3, PayPal create-order (no capture)
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Deterministic tests use mocks and a local database; they are separate from the live
+provider checks and from a real Sandbox checkout.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Design notes
+
+- Money is integer minor units; the server computes totals and freezes the approved offer.
+- An order is marked paid only from a COMPLETED capture whose order, merchant, amount and
+  currency match the frozen order. Redirects and approvals alone prove nothing.
+- Access is a scoped, expiring, revocable grant checked on every request. Links carry the
+  grant in the URL fragment, which browsers do not send to the server.
+- A scheduled reconciler resolves payments whose capture response was lost.
+
+## Licence
+
+Apache-2.0. See `LICENSE`.
