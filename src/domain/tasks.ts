@@ -14,6 +14,8 @@ const ROLES: Role[] = ["requester", "helper", "chooser", "payer"];
 
 export async function createTask(input: {
   title: string; purpose?: string; market?: string; currency?: string; starterRoles?: Role[]; starterLabel?: string;
+  deriveToken?: (grantId: string) => string;
+  inTx?: (c: Tx, ids: { taskId: string; grantId: string }) => Promise<void>;
 }) {
   if (!input.title?.trim()) throw new DomainError("invalid", "Title required");
   const roles = input.starterRoles ?? ["requester", "chooser"];
@@ -23,12 +25,13 @@ export async function createTask(input: {
     await c.query(`INSERT INTO tasks (id,title,purpose,market,currency) VALUES ($1,$2,$3,$4,$5)`, [
       taskId, input.title.trim(), input.purpose ?? "", input.market ?? "US", input.currency ?? "USD",
     ]);
-    const token = newToken();
     const grantId = randomUUID();
+    const token = input.deriveToken ? input.deriveToken(grantId) : newToken();
     await c.query(`INSERT INTO grants (id,task_id,token_hash,roles,label,can_delegate) VALUES ($1,$2,$3,$4,$5,true)`, [
       grantId, taskId, hashToken(token), roles, input.starterLabel ?? "",
     ]);
     await logEvent(c, taskId, grantId, "task.created", { roles });
+    await input.inTx?.(c, { taskId, grantId });
     return { taskId, token };
   });
 }

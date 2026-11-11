@@ -1,14 +1,10 @@
-import { getInterpreter } from "@/adapters";
-import { AdapterError, type Interpretation } from "@/adapters/types";
+import { postExchange } from "@/chat/exchange";
 import { resolveGrant } from "@/domain/access";
-import { DomainError } from "@/domain/errors";
-import { getExchange, listMessages, recordAssistantMessage } from "@/domain/messages";
-import { addMessage, getComparison } from "@/domain/tasks";
+import { listMessages } from "@/domain/messages";
 import { bearer, handle, invalid, json, rateLimit, readJson, str, uuid } from "../../../_lib/http";
 
 const MIMES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_IMAGE = 4 * 1024 * 1024;
-const FALLBACK = "I could not read that, please describe it.";
 
 export const GET = handle<{ id: string }>(async (req, { id }) =>
   json({ messages: await listMessages(uuid(id), bearer(req)) }));
@@ -31,30 +27,6 @@ export const POST = handle<{ id: string }>(async (req, { id }) => {
     if (Math.floor((imageBase64.length * 3) / 4) > MAX_IMAGE) throw invalid("Photo is too large");
   }
 
-  // Only the fact of an attachment is stored; the bytes live for this call
-  const added = await addMessage(taskId, token, {
-    channel: "browser", providerMessageId: key, body: text ?? "", mediaRef: imageBase64 ? "inline:attached" : undefined,
-  });
-  if (added.duplicate) {
-    const done = await getExchange(taskId, token, key);
-    if (done.messages.length < 2) throw new DomainError("conflict", "Still working on that message; send it again in a moment");
-    return json(done);
-  }
-
-  const { requirements } = await getComparison(taskId, token);
-  let result: Interpretation | null = null;
-  try {
-    result = await getInterpreter().interpret({
-      text: text || undefined,
-      image: imageBase64 ? { mime: mime!, base64: imageBase64 } : undefined,
-      currentRequirements: requirements.map((r) => ({ key: r.key, op: r.op, value: r.value, unit: r.unit })),
-    });
-  } catch (e) {
-    console.error("api_error", "interpret_failed", e instanceof AdapterError ? e.kind : (e as Error)?.name);
-  }
-  const proposals = (result?.proposedRequirements ?? []).slice(0, 10);
-  const clarification = result?.clarification ?? null;
-  const reply = (result?.reply || FALLBACK).slice(0, 2000);
-  await recordAssistantMessage(taskId, reply, { key, result: { proposals, clarification } });
-  return json(await getExchange(taskId, token, key));
+  const image = imageBase64 ? { mime: mime!, base64: imageBase64 } : undefined;
+  return json(await postExchange(taskId, token, { channel: "browser", key, text: text || undefined, image }));
 });

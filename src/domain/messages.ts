@@ -50,10 +50,10 @@ export async function recordAssistantMessage(taskId: string, body: string, excha
 }
 
 // The stored outcome of one browser message: user message, reply, proposals
-export async function getExchange(taskId: string, token: string, exchangeKey: string) {
+export async function getExchange(taskId: string, token: string, exchangeKey: string, channel = "browser") {
   return tx(async (c) => {
     await authorize(c, taskId, token, "message");
-    const user = (await c.query(`${SELECT} WHERE m.task_id=$1 AND m.channel='browser' AND m.provider_message_id=$2`, [taskId, exchangeKey])).rows[0];
+    const user = (await c.query(`${SELECT} WHERE m.task_id=$1 AND m.channel=$3 AND m.provider_message_id=$2`, [taskId, exchangeKey, channel])).rows[0];
     const stored = (await c.query(`SELECT result FROM idempotency WHERE scope=$1 AND key=$2`, [`msg:${taskId}`, exchangeKey])).rows[0]?.result as
       | (ExchangeResult & { assistantId: string }) | undefined;
     const reply = stored ? (await c.query(`${SELECT} WHERE m.id=$1 AND m.task_id=$2`, [stored.assistantId, taskId])).rows[0] : undefined;
