@@ -1,0 +1,27 @@
+{
+  "secret": "0123456789abcdef0123456789abcdef-test-secret",
+  "format": "hex(HMAC-SHA256(secret, ts + \"\\n\" + METHOD + \"\\n\" + path + \"\\n\" + body))",
+  "vectors": [
+    {
+      "ts": "1700000000",
+      "method": "POST",
+      "path": "/api/channel/whatsapp/inbound",
+      "body": "{\"providerMessageId\":\"3EB0A1B2\",\"sender\":\"254712345678\",\"text\":\"hello\",\"receivedAt\":\"2023-11-14T22:13:20.000Z\"}",
+      "signature": "89a04106c78a297cd126cd2a02482514927f2eb27b99bfd9b4264e0acc1c9219"
+    },
+    {
+      "ts": "1700000100",
+      "method": "POST",
+      "path": "/api/channel/whatsapp/outbox/123e4567-e89b-12d3-a456-426614174000/ack",
+      "body": "{\"state\":\"sent\",\"providerMessageId\":\"3EB0FFEE\"}",
+      "signature": "0feae543d0f16940a7c080d21836510262b773bdb54714bc925385edec37756a"
+    },
+    {
+      "ts": "1700000200",
+      "method": "POST",
+      "path": "/api/channel/whatsapp/health",
+      "body": "",
+      "signature": "ef43b12ee5e195ee5f9f57eeb3774b9dcedc8a9a10e93a5b74ed5fbca29a63fd"
+    }
+  ]
+}
