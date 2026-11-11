@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { validateInterpretation, GeminiInterpreter } from "@/adapters/gemini";
 import { mapProduct, Channel3Discovery } from "@/adapters/channel3";
-import { PayPalPayments, discoverMerchantId } from "@/adapters/paypal";
+import { PayPalPayments, discoverMerchantId, isSandboxPayPalUrl } from "@/adapters/paypal";
 import { OpenRouterInterpreter } from "@/adapters/openrouter";
 import { AdapterError } from "@/adapters/types";
 
@@ -196,5 +196,14 @@ describe("openrouter", () => {
     await expect(run()).rejects.toBeInstanceOf(AdapterError);
     stub(json({}, 402));
     await expect(run()).rejects.toMatchObject({ kind: "rejected" });
+  });
+});
+
+describe("approval url", () => {
+  it("accepts only https sandbox PayPal hosts", () => {
+    expect(isSandboxPayPalUrl("https://www.sandbox.paypal.com/checkoutnow?token=A")).toBe(true);
+    for (const bad of ["http://www.sandbox.paypal.com/x", "https://paypal.com.evil.test/x", "https://evil.test/www.sandbox.paypal.com", "https://www.paypal.com/x", "javascript:alert(1)", "", undefined]) {
+      expect(isSandboxPayPalUrl(bad as string)).toBe(false);
+    }
   });
 });

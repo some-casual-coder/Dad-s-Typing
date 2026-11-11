@@ -9,7 +9,7 @@ export async function claimOutbox(limit = 5, leaseSeconds = 120) {
   const lease = Math.min(Math.max(Math.trunc(leaseSeconds) || 120, 30), 300);
   return tx(async (c) => {
     // out of attempts with no ack: it may have been sent, so never resend
-    await c.query(`UPDATE channel_outbox SET state='unknown', body='', updated_at=now() WHERE channel=$1 AND state='leased' AND lease_until < now() AND attempts >= $2`, [CHANNEL, MAX_ATTEMPTS]);
+    await c.query(`UPDATE channel_outbox SET state='unknown', body='', recipient='', updated_at=now() WHERE channel=$1 AND state='leased' AND lease_until < now() AND attempts >= $2`, [CHANNEL, MAX_ATTEMPTS]);
     const r = await c.query(
       `UPDATE channel_outbox SET state='leased', attempts=attempts+1, lease_until=now() + ($3 || ' seconds')::interval, updated_at=now()
         WHERE id IN (SELECT id FROM channel_outbox WHERE channel=$1 AND (state='pending' OR (state='leased' AND lease_until < now()))
@@ -32,7 +32,7 @@ export async function ackOutbox(id: string, ack: { state: string; providerMessag
     const cur = (await c.query(`SELECT state FROM channel_outbox WHERE id=$1 AND channel=$2 FOR UPDATE`, [id, CHANNEL])).rows[0];
     if (!cur) throw new DomainError("not_found", "Unknown outbox item");
     if (FINAL.has(cur.state)) return { state: cur.state as string };
-    await c.query(`UPDATE channel_outbox SET state=$2, provider_message_id=$3, error=$4, body='', lease_until=NULL, updated_at=now() WHERE id=$1`,
+    await c.query(`UPDATE channel_outbox SET state=$2, provider_message_id=$3, error=$4, body='', recipient='', lease_until=NULL, updated_at=now() WHERE id=$1`,
       [id, ack.state, ack.providerMessageId ?? null, ack.error ?? null]);
     return { state: ack.state };
   });

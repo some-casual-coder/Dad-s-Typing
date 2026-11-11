@@ -83,7 +83,7 @@ export class PayPalPayments implements Payments {
     const link = links.find((l) => l.rel === "payer-action") ?? links.find((l) => l.rel === "approve");
     const approveUrl = str(link?.href);
     const paypalOrderId = str(res.json.id);
-    if (!paypalOrderId || !approveUrl?.startsWith("https://")) throw new AdapterError("unavailable", "PayPal order response invalid");
+    if (!paypalOrderId || !isSandboxPayPalUrl(approveUrl)) throw new AdapterError("unavailable", "PayPal order response invalid");
     return { paypalOrderId, approveUrl };
   }
 
@@ -112,4 +112,14 @@ export function paypalFromEnv(env = process.env): Payments {
 
 export async function discoverMerchantId(p: Payments, orderId: string): Promise<string | undefined> {
   return (await p.getOrder(orderId)).payeeMerchantId;
+}
+
+// The buyer is redirected here, so only a PayPal sandbox host is acceptable
+export function isSandboxPayPalUrl(u: string | undefined): u is string {
+  try {
+    const url = new URL(u ?? "");
+    return url.protocol === "https:" && (url.hostname === "sandbox.paypal.com" || url.hostname.endsWith(".sandbox.paypal.com"));
+  } catch {
+    return false;
+  }
 }

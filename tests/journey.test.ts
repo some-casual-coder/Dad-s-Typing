@@ -65,7 +65,9 @@ describe("clarification changes eligibility, selection and payment", () => {
     expect((await settleCapture(att.id, { ...wrongAmount, amountMinor: 4399, currency: "GBP" })).flagged).toBe(true);
     expect((await settleCapture(att.id, { ...wrongAmount, amountMinor: 4399, paypalOrderId: "PP-OTHER" })).flagged).toBe(true);
     const flags = await pool.query(`SELECT count(*)::int AS n FROM payment_exceptions WHERE attempt_id=$1`, [att.id]);
-    expect(flags.rows[0].n).toBe(4);
+    expect(flags.rows[0].n).toBe(2);
+    await settleCapture(att.id, wrongAmount);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM payment_exceptions WHERE attempt_id=$1`, [att.id])).rows[0].n).toBe(2);
     expect((await getTaskView(s.taskId, s.mum)).receipt).toBeNull();
 
     const good = { paypalOrderId: "PP-ORDER-1", captureId: "CAP1", status: "COMPLETED", amountMinor: 4399, currency: "USD", payeeMerchantId: "MERCH1" };

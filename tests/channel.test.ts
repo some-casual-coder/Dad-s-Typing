@@ -135,7 +135,7 @@ describe("a forwarded photo", () => {
     const m = msg({ image: IMG });
     await signed(inbound, IN, m);
     await processInboxOnce();
-    await pool.query("UPDATE channel_inbox SET state='processing', locked_until=now() - interval '1 minute', image_b64=$1 WHERE provider_message_id=$2", [IMG.base64, m.providerMessageId]);
+    await pool.query("UPDATE channel_inbox SET state='processing', sender='254700000001', locked_until=now() - interval '1 minute', image_b64=$1 WHERE provider_message_id=$2", [IMG.base64, m.providerMessageId]);
     await processInboxOnce();
     expect(await count("SELECT count(*)::int n FROM channel_identities")).toBe(1);
     expect(await count("SELECT count(DISTINCT task_id)::int n FROM channel_inbox")).toBe(1);
@@ -195,7 +195,9 @@ describe("outbox", () => {
     expect((await signed(ack, ackPath(id), { state: "sent", providerMessageId: "3EB0ABC" }, { id })).json.state).toBe("sent");
     expect((await signed(ack, ackPath(id), { state: "sent", providerMessageId: "3EB0ABC" }, { id })).json.state).toBe("sent");
     expect((await signed(ack, ackPath(id), { state: "failed" }, { id })).json.state).toBe("sent");
-    expect((await pool.query("SELECT body FROM channel_outbox")).rows[0].body).toBe("");
+    const gone = (await pool.query("SELECT body, recipient FROM channel_outbox")).rows[0];
+    expect(gone).toEqual({ body: "", recipient: "" });
+    expect(await count("SELECT count(*)::int n FROM channel_inbox WHERE sender <> ''")).toBe(0);
     expect((await signed(claim, CL, {})).json.items).toHaveLength(0);
     expect((await signed(ack, ackPath(id), { state: "bogus" }, { id })).status).toBe(422);
     const other = "00000000-0000-4000-8000-000000000000";
@@ -225,5 +227,15 @@ describe("health", () => {
     await pool.query("UPDATE channel_status SET reported_at = now() - interval '10 minutes'");
     expect((await ((await (status as H)(new Request("http://localhost/api/channel/whatsapp/status"))).json())).connected).toBe(false);
     expect((await signed(health, H, { connected: "yes" })).status).toBe(422);
+  });
+});
+
+describe("retention", () => {
+  it("drops finished rows after a week", async () => {
+    await signed(inbound, IN, msg({ image: IMG }));
+    await processInboxOnce();
+    await pool.query("UPDATE channel_inbox SET created_at = now() - interval '8 days'");
+    await processInboxOnce();
+    expect(await count("SELECT count(*)::int n FROM channel_inbox")).toBe(0);
   });
 });

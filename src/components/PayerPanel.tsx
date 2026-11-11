@@ -25,6 +25,8 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
     setBusy(true); setErr("");
     try {
       const r = await api.payCreate(taskId, token, order.id);
+      const host = new URL(r.approveUrl).hostname;
+      if (!/(^|\.)paypal\.com$/.test(host)) throw new Error("Unexpected PayPal address.");
       window.location.assign(r.approveUrl);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not start PayPal.");

@@ -50,9 +50,17 @@ export async function enqueueInbound(m: InboundInput): Promise<"accepted" | "dup
 
 type Row = Record<string, unknown>;
 
+// Finished rows keep no phone number or text and are dropped after a week
+async function purgeOld() {
+  await tx(async (c) => {
+    await c.query(`DELETE FROM channel_inbox WHERE state IN ('done','failed') AND created_at < now() - interval '7 days'`);
+    await c.query(`DELETE FROM channel_outbox WHERE state IN ('sent','failed','unknown') AND updated_at < now() - interval '7 days'`);
+  });
+}
+
 async function claimInbox(): Promise<Row | null> {
   return tx(async (c) => {
-    await c.query(`UPDATE channel_inbox SET state='failed', image_b64=NULL WHERE state='processing' AND locked_until < now() AND attempts >= $1`, [MAX_ATTEMPTS]);
+    await c.query(`UPDATE channel_inbox SET state='failed', image_b64=NULL, sender='', body='' WHERE state='processing' AND locked_until < now() AND attempts >= $1`, [MAX_ATTEMPTS]);
     const r = await c.query(
       `UPDATE channel_inbox SET state='processing', attempts=attempts+1, locked_until=now()+interval '3 minutes'
         WHERE id = (SELECT id FROM channel_inbox WHERE channel=$1 AND (state='received' OR (state='processing' AND locked_until < now()))
@@ -116,12 +124,13 @@ async function processRow(row: Row) {
       `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (dedupe_key) DO NOTHING`,
       [randomUUID(), CHANNEL, row.sender, body, `inbox:${row.id}`],
     );
-    await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, locked_until=NULL WHERE id=$1`, [row.id]);
+    await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, sender='', locked_until=NULL WHERE id=$1`, [row.id]);
   });
 }
 
 // Returns how many messages were handled; safe to call concurrently
 export async function processInboxOnce(max = 10): Promise<number> {
+  await purgeOld();
   let n = 0;
   for (; n < max; n++) {
     const row = await claimInbox();

@@ -100,6 +100,8 @@ export async function settleCapture(attemptId: string, obs: ObservedCapture) {
     if ((a.status === "cancelled" || a.status === "failed") && status !== "COMPLETED") return result();
 
     const flag = async (kind: string) => {
+      const open = await c.query(`SELECT 1 FROM payment_exceptions WHERE attempt_id=$1 AND kind=$2 AND resolved_at IS NULL`, [attemptId, kind]);
+      if (open.rowCount) return result(true);
       await c.query(`INSERT INTO payment_exceptions (id,task_id,attempt_id,kind,detail) VALUES ($1,$2,$3,$4,$5)`,
         [randomUUID(), o.task_id, attemptId, kind, JSON.stringify({ status, paypalOrderId: obs.paypalOrderId })]);
       await c.query(`UPDATE payment_attempts SET status='pending', updated_at=now() WHERE id=$1`, [attemptId]);
