@@ -58,7 +58,8 @@ export default function Home() {
       const link = findLinks(title).find((f) => f.type === "social");
       const said = link ? withoutSocialLinks(title) : title.trim();
       const name = said || (link?.type === "social" ? `Shared ${LABEL[link.ref.platform]} post` : "Something for Mum");
-      const r = await api.createTask({ title: name.slice(0, 120), starterRoles, ...(link ? { seedExternal: false } : {}) });
+      // Nothing named yet: no search on the placeholder; Mum says what she wants
+      const r = await api.createTask({ title: name.slice(0, 120), starterRoles, ...(link || !said ? { seedExternal: false } : {}) });
       storeToken(r.taskId, r.token);
       if (link) await api.sendMessage(r.taskId, r.token, { clientMessageId: newId(), text: title.trim() });
       if (forMum) setCreated(r);
