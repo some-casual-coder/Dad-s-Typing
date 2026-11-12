@@ -40,8 +40,12 @@ export function compose(status: NoticeStatus, x: NoticeCtx, hub: Hub | null): No
       { audience: "all", body: "Cancelled, and the payment is being refunded in full." }];
     case "needs_approval": return x.extraMinor
       ? [{ audience: "payer", body: `The final shipping bill for the ${x.item} is ${money(x.extraMinor, x.currency)} above what you paid. Please approve or decline here: ${x.link}` }] : [];
-    case "settled": return x.actualMinor !== null && x.actualMinor < x.capMinor
-      ? [{ audience: "payer", body: `Final cost settled at ${money(x.actualMinor, x.currency)}. ${money(x.capMinor - x.actualMinor, x.currency)} is on its way back to your PayPal.` }] : [];
+    case "settled":
+      if (x.actualMinor !== null && x.actualMinor < x.capMinor)
+        return [{ audience: "payer", body: `Final cost settled at ${money(x.actualMinor, x.currency)}. ${money(x.capMinor - x.actualMinor, x.currency)} is on its way back to your PayPal.` }];
+      if (x.actualMinor !== null && x.actualMinor > x.capMinor)
+        return [{ audience: "payer", body: `Thanks, the extra ${money(x.actualMinor - x.capMinor, x.currency)} is paid. The ${x.item} is fully settled.` }];
+      return [];
     case "ready_to_collect": return [ready(x, hub)];
   }
 }

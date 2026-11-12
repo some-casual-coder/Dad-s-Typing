@@ -228,7 +228,7 @@ export async function createSellerOrder(taskId: string, token: string, input: { 
     const t = (await c.query(`SELECT version, cancelled_at FROM tasks WHERE id=$1 FOR UPDATE`, [taskId])).rows[0];
     const s = (await c.query(`SELECT * FROM selections WHERE id=$1 AND task_id=$2`, [input.selectionId, taskId])).rows[0];
     if (!s) throw new DomainError("not_found", "Selection not found");
-    const existing = (await c.query(`SELECT * FROM seller_orders WHERE selection_id=$1`, [s.id])).rows[0];
+    const existing = (await c.query(`SELECT * FROM seller_orders WHERE selection_id=$1 AND kind <> 'topup'`, [s.id])).rows[0];
     if (existing) return orderView(existing);
     if (t.cancelled_at || s.superseded_at || s.task_version !== t.version)
       throw new DomainError("stale", "The choice changed; it needs a fresh review");

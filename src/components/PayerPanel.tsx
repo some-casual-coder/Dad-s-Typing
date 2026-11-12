@@ -21,11 +21,11 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
     finally { setBusy(false); }
   }
 
-  async function pay() {
-    if (!order) return;
+  async function pay(orderId = order?.id) {
+    if (!orderId) return;
     setBusy(true); setErr("");
     try {
-      const r = await api.payCreate(taskId, token, order.id);
+      const r = await api.payCreate(taskId, token, orderId);
       const host = new URL(r.approveUrl).hostname;
       if (!/(^|\.)paypal\.com$/.test(host)) throw new Error("Unexpected PayPal address.");
       window.location.assign(r.approveUrl);
@@ -74,17 +74,24 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
             <dt>Total</dt><dd><strong>{formatMoney(order.totalMinor, order.currency)}</strong></dd>
           </dl>}
           {order.status === "awaiting_payer" && (
-            <button className="btn pay" disabled={busy} onClick={pay}>
+            <button className="btn pay" disabled={busy} onClick={() => pay()}>
               {busy ? "Opening PayPal..." : "Pay with PayPal (sandbox)"}
             </button>
           )}
           {order.status === "pending" && (
             <>
               <p role="status">Checking the payment with PayPal...</p>
-              <button className="btn" disabled={busy} onClick={pay}>Not approved yet? Continue to PayPal</button>
+              <button className="btn" disabled={busy} onClick={() => pay()}>Not approved yet? Continue to PayPal</button>
             </>
           )}
           {order.status === "paid" && <p role="status">Paid.</p>}
+          {view.topup && view.topup.status !== "paid" && (
+            <div className="note stack">
+              <p>You approved an extra {formatMoney(view.topup.totalMinor, view.topup.currency)} for the final shipping bill.</p>
+              <button className="btn pay" disabled={busy} onClick={() => pay(view.topup!.id)}>{busy ? "Opening PayPal..." : "Pay the extra with PayPal (sandbox)"}</button>
+            </div>
+          )}
+          {view.topup?.status === "paid" && <p role="status">Extra paid: {formatMoney(view.topup.totalMinor, view.topup.currency)}.</p>}
           {!!order.refundedMinor && <p role="status">Refunded: {formatMoney(order.refundedMinor, order.currency)}</p>}
           {!!order.refundPendingMinor && <p role="status">Refund pending: {formatMoney(order.refundPendingMinor, order.currency)}</p>}
           {order.status === "failed" && <p className="error">The payment did not go through. You can review the order again.</p>}

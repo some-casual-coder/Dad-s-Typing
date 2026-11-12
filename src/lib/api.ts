@@ -43,6 +43,7 @@ export interface TaskView {
   viewer: { roles: Role[] }; requirements: Requirement[];
   selection: { id: string; stale: boolean; title: string; seller: string; route: string; reason: string; chosenAt: string } | null;
   order: OrderView | null; receipt: Receipt | null; fulfilment: Fulfilment | null;
+  topup?: { id: string; totalMinor: number; currency: string; status: string } | null;
 }
 export interface Check { key: string; essential: boolean; result: "match" | "mismatch" | "unknown"; reason: string }
 export interface Offer {

@@ -90,6 +90,13 @@ async function addEvent(c: Tx, orderId: string, taskId: string, status: Status, 
   return true;
 }
 
+// The approved extra arrived: the order is fully settled
+export async function onTopupPaid(c: Tx, order: { parent_order_id: string; task_id: string }) {
+  const r = await c.query(`UPDATE concierge_orders SET extra_paid_at=now(), settled_at=COALESCE(settled_at, now()) WHERE seller_order_id=$1 AND extra_paid_at IS NULL RETURNING extra_due_minor`,
+    [order.parent_order_id]);
+  if (r.rowCount) await addEvent(c, order.parent_order_id, order.task_id, "settled", "system", `extra-paid:${order.parent_order_id}`, "The approved extra was paid.");
+}
+
 export async function onConciergePaid(c: Tx, order: { id: string; task_id: string }) {
   const co = (await c.query(`SELECT eta FROM concierge_orders WHERE seller_order_id=$1`, [order.id])).rows[0];
   if (co) await addEvent(c, order.id, order.task_id, "paid", "system", `paid:${order.id}`, "Payment confirmed by PayPal (sandbox).", co.eta);
@@ -205,11 +212,20 @@ export async function cancelOrder(payments: Payments, taskId: string, token: str
 export async function decideExtra(taskId: string, token: string, decision: "approved" | "declined") {
   return tx(async (c) => {
     const g = await authorize(c, taskId, token, "pay");
-    const r = await c.query(`UPDATE concierge_orders SET extra_decision=$2 WHERE task_id=$1 AND extra_due_minor IS NOT NULL AND extra_decision IS NULL RETURNING seller_order_id`,
-      [taskId, decision]);
+    const r = await c.query(`UPDATE concierge_orders SET extra_decision=$2 WHERE task_id=$1 AND extra_due_minor IS NOT NULL AND extra_decision IS NULL
+      RETURNING seller_order_id, extra_due_minor`, [taskId, decision]);
     if (!r.rowCount) throw new DomainError("not_found", "Nothing to approve");
     await logEvent(c, taskId, g.id, `order.extra_${decision}`, {});
-    return { ok: true };
+    if (decision === "declined") return { ok: true, topupId: null };
+    // A second sandbox order for exactly the approved extra, same merchant
+    const p = (await c.query(`SELECT * FROM seller_orders WHERE id=$1`, [r.rows[0].seller_order_id])).rows[0];
+    const id = randomUUID();
+    await c.query(
+      `INSERT INTO seller_orders (id,task_id,selection_id,created_by,merchant_id,seller,sku,title,quantity,currency,item_minor,shipping_minor,total_minor,kind,parent_order_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,0,$10,'topup',$11)`,
+      [id, taskId, p.selection_id, g.id, p.merchant_id, p.seller, `${p.sku}:extra`.slice(0, 80), `Extra shipping: ${p.title}`.slice(0, 300), p.currency, r.rows[0].extra_due_minor, p.id]);
+    await logEvent(c, taskId, g.id, "order.frozen", { orderId: id, totalMinor: r.rows[0].extra_due_minor, kind: "topup" });
+    return { ok: true, topupId: id };
   });
 }
 

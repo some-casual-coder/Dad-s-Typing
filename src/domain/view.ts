@@ -15,8 +15,8 @@ export async function getTaskView(taskId: string, token: string) {
     const t = (await c.query(`SELECT * FROM tasks WHERE id=$1`, [taskId])).rows[0];
     const sel = (await c.query(`SELECT * FROM selections WHERE task_id=$1 AND superseded_at IS NULL`, [taskId])).rows[0];
     // a paid order is the truth even if the choice moved on afterwards
-    const paid = (await c.query(`SELECT * FROM seller_orders WHERE task_id=$1 AND status='paid' LIMIT 1`, [taskId])).rows[0];
-    const ord = paid ?? (sel ? (await c.query(`SELECT * FROM seller_orders WHERE selection_id=$1`, [sel.id])).rows[0] : undefined);
+    const paid = (await c.query(`SELECT * FROM seller_orders WHERE task_id=$1 AND status='paid' AND kind <> 'topup' LIMIT 1`, [taskId])).rows[0];
+    const ord = paid ?? (sel ? (await c.query(`SELECT * FROM seller_orders WHERE selection_id=$1 AND kind <> 'topup'`, [sel.id])).rows[0] : undefined);
     const reqs = (await c.query(`SELECT id,key,op,value,unit,essential,status FROM requirements WHERE task_id=$1 AND superseded_at IS NULL ORDER BY created_at`, [taskId])).rows;
     const stale = !!sel && sel.task_version !== t.version && !ord;
 
@@ -43,8 +43,15 @@ export async function getTaskView(taskId: string, token: string) {
         ? { seller: ord.seller, title: ord.title, sku: ord.sku, currency: ord.currency, totalMinor: ord.total_minor, taskId: t.id, ...refunds }
         : null,
       fulfilment: await timeline(c, t.id, g.roles),
+      // A payment above the cap, once the payer approved it
+      topup: ord && can(g.roles, "pay") ? await topupFor(c, ord.id) : null,
     };
   });
+}
+
+async function topupFor(c: Tx, parentId: string) {
+  const o = (await c.query(`SELECT * FROM seller_orders WHERE parent_order_id=$1 AND kind='topup'`, [parentId])).rows[0];
+  return o ? { id: o.id as string, totalMinor: o.total_minor as number, currency: o.currency as string, status: o.status as string } : null;
 }
 
 // What the one payment covers, for the payer's review

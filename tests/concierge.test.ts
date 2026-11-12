@@ -90,8 +90,23 @@ describe("one payment for an import (option B, sandbox)", () => {
     const v = await getTaskView(s.taskId, s.token);
     expect(v.fulfilment!.money!.extraDueMinor).toBe(2500);
     expect(v.fulfilment!.done.at(-1)!.status).toBe("needs_approval");
-    await decideExtra(s.taskId, s.token, "approved");
+    const { topupId } = await decideExtra(s.taskId, s.token, "approved");
     await expect(decideExtra(s.taskId, s.token, "declined")).rejects.toMatchObject({ code: "not_found" });
+    // The approved extra is its own sandbox payment, through the same verified path
+    const w = await getTaskView(s.taskId, s.token);
+    expect(w.topup).toMatchObject({ id: topupId, totalMinor: 2500, currency: "USD", status: "awaiting_payer" });
+    expect(w.order!.id).toBe(s.order.id);
+    const att = await beginAttempt(s.taskId, s.token, topupId!);
+    await recordProviderOrder(att.id, "PP-EXTRA-1");
+    const wrong = await settleCapture(att.id, { paypalOrderId: "PP-EXTRA-1", captureId: "CAPEXTRA0001", status: "COMPLETED", amountMinor: 2400, currency: "USD", payeeMerchantId: "MERCH1" });
+    expect(wrong.flagged).toBe(true);
+    await pool.query(`UPDATE payment_exceptions SET resolved_at=now() WHERE attempt_id=$1`, [att.id]);
+    await settleCapture(att.id, { paypalOrderId: "PP-EXTRA-1", captureId: "CAPEXTRA0001", status: "COMPLETED", amountMinor: 2500, currency: "USD", payeeMerchantId: "MERCH1" });
+    const done = await getTaskView(s.taskId, s.token);
+    expect(done.topup!.status).toBe("paid");
+    expect(done.fulfilment!.done.at(-1)!.status).toBe("settled");
+    expect(done.fulfilment!.notices.at(-1)!.body).toBe("Thanks, the extra USD 25.00 is paid. The Sherpa cat carrier is fully settled.");
+    expect(done.receipt!.totalMinor).toBe(s.order.totalMinor);
   });
 
   it("duplicate events and a refund timeout never double-refund", async () => {

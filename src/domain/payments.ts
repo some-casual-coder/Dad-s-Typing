@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { authorize } from "./access";
-import { onConciergePaid } from "./concierge";
+import { onConciergePaid, onTopupPaid } from "./concierge";
 import { tx, type Tx } from "./db";
 import { DomainError } from "./errors";
 import { logEvent } from "./events";
@@ -121,6 +121,7 @@ export async function settleCapture(attemptId: string, obs: ObservedCapture) {
       await c.query(`UPDATE seller_orders SET status=$2 WHERE id=$1`, [o.id, order]);
       if (attempt === "captured") await c.query(`UPDATE payment_operations SET status='succeeded', updated_at=now() WHERE attempt_id=$1 AND kind='capture'`, [attemptId]);
       if (attempt === "captured" && o.kind === "concierge") await onConciergePaid(c, o);
+      if (attempt === "captured" && o.kind === "topup") await onTopupPaid(c, o);
       await logEvent(c, o.task_id, null, `payment.${attempt}`, { attemptId, orderId: o.id });
       return result();
     };
