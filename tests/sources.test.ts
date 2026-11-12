@@ -390,3 +390,12 @@ describe("R11 per-platform fixture runs of the link adapter path", () => {
     });
   }
 });
+
+describe("follow-up turns keep the task's item", () => {
+  it("passes the identified item to the interpreter as data", async () => {
+    const t = await solo();
+    await pool.query(`UPDATE tasks SET search_query='top opening cat carrier' WHERE id=$1`, [t.taskId]);
+    await postExchange(t.taskId, t.token, { channel: "web", key: key(), text: "It must open from the top, not the front." });
+    expect(fake.interpret.mock.calls[0][0]).toMatchObject({ item: "top opening cat carrier", text: "It must open from the top, not the front." });
+  });
+});

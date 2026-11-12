@@ -1,5 +1,6 @@
 import { getInterpreter } from "@/adapters";
 import { AdapterError, type Interpretation } from "@/adapters/types";
+import { pool } from "@/domain/db";
 import { DomainError } from "@/domain/errors";
 import { getExchange, recordAssistantMessage } from "@/domain/messages";
 import { addMessage, getComparison } from "@/domain/tasks";
@@ -46,9 +47,11 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   let result: Interpretation | null = null;
   if (words || input.image) {
     try {
+      const known = (await pool.query(`SELECT search_query FROM tasks WHERE id=$1`, [taskId])).rows[0]?.search_query as string | null;
       result = await getInterpreter().interpret({
         text: words || undefined,
         image: input.image,
+        item: known,
         currentRequirements: requirements.map((r) => ({ key: r.key, op: r.op, value: r.value, unit: r.unit })),
       });
     } catch (e) {

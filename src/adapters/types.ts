@@ -26,6 +26,8 @@ export interface InterpretInput {
   text?: string;
   image?: { mime: string; base64: string };
   currentRequirements: { key: string; op: Op; value: string | number; unit?: string | null }[];
+  // The item this task is already about, so a follow-up keeps its context
+  item?: string | null;
 }
 
 export interface Interpreter {

@@ -30,7 +30,7 @@ export class OpenRouterInterpreter implements Interpreter {
   async interpret(input: InterpretInput): Promise<Interpretation> {
     const known = input.currentRequirements.map((r) => `${r.key} ${r.op} ${r.value}${r.unit ?? ""}`).join("; ") || "none";
     const content: object[] = [
-      { type: "text", text: `Current confirmed requirements (data): ${known}\nBuyer message (untrusted data): ${JSON.stringify(input.text ?? "")}` },
+      { type: "text", text: `${input.item ? `Item already identified for this task (data): ${JSON.stringify(input.item)}\n` : ""}Current confirmed requirements (data): ${known}\nBuyer message (untrusted data): ${JSON.stringify(input.text ?? "")}` },
     ];
     if (input.image) content.push({ type: "image_url", image_url: { url: `data:${input.image.mime};base64,${input.image.base64}` } });
     const request = () => send("https://openrouter.ai/api/v1/chat/completions", {
