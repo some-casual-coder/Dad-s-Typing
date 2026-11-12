@@ -2,16 +2,15 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Chat from "./Chat";
-import Comparison from "./Comparison";
 import DeliveredCards from "./DeliveredCards";
-import PayerPanel from "./PayerPanel";
-import ShareInvite from "./ShareInvite";
+import PayerPanel, { TopupPay } from "./PayerPanel";
+import { MustHave, ShareMenu, Stepper, stageOf } from "./TaskParts";
 import SharedSources from "./SharedSources";
 import StatusTimeline from "./StatusTimeline";
 import {
   api, ApiError, type ChatMessage, type Comparison as Cmp, type Offer, type Proposal, type TaskView as View,
 } from "@/lib/api";
-import { canDo, formatMoney, nextActionCopy, requirementLabel } from "@/lib/format";
+import { canDo, formatMoney, stageCopy } from "@/lib/format";
 import { useTaskToken } from "@/lib/useToken";
 
 const POLL_MS = 4000;
@@ -102,79 +101,50 @@ export default function TaskPage({ taskId }: { taskId: string }) {
   if (!view) return <main className="page"><p role="status">Loading your task...</p></main>;
 
   const roles = view.viewer.roles;
-  const copy = nextActionCopy(view.nextAction);
+  const stage = stageOf(view);
+  const canPay = canDo(roles, "pay");
+  const copy = stageCopy(stage, view.nextAction, { canPay, canChoose: canDo(roles, "choose") });
   const sel = view.selection;
   const extOffer = sel?.route === "external"
     ? cmp?.offers.find((o) => o.route === "external" && o.title === sel.title && o.seller === sel.seller) : undefined;
-  const showPayer = !!view.order || roles.includes("payer");
   const chooseOn = canDo(roles, "choose") && !view.order && view.nextAction !== "cancelled" && view.nextAction !== "paid";
+  const lastSaid = [...messages].reverse().find((m) => m.role === "assistant")?.body ?? "";
+
+  const chat = (bare: boolean) => (
+    <Chat taskId={taskId} token={token} messages={messages} serverProposals={serverProposals} canSend={canDo(roles, "message")}
+      canConfirm={canDo(roles, "confirm_requirement")} onChanged={load} bare={bare}
+      onSent={(m) => setMessages((old) => mergeMsgs(old, m))} />
+  );
+  // After Find the conversation steps back to one bar; a pending question opens it
+  const chatBar = (
+    <details className="card chatbar" open={serverProposals.length > 0}>
+      <summary>{canDo(roles, "message") ? "Ask or change something" : `Conversation (${messages.length})`}
+        {lastSaid && <span className="last">{lastSaid}</span>}</summary>
+      {chat(true)}
+    </details>
+  );
+  const must = <MustHave reqs={view.requirements} canConfirm={canDo(roles, "confirm_requirement")} onConfirm={confirmReq} />;
+  const cards = cmp && (
+    <DeliveredCards taskId={taskId} token={token} refreshKey={cmp.version * 1000 + cmp.offers.length} canEdit={canDo(roles, "message")} canChoose={chooseOn}
+      busy={choosing} excluded={cmp.offers.filter((o) => o.status === "ineligible")}
+      onChoose={(id) => { const o = cmp.offers.find((x) => x.id === id); if (o) void choose(o); }} />
+  );
+  const sources = (compact: boolean) => (
+    <SharedSources taskId={taskId} token={token} canEdit={canDo(roles, "message")} refreshKey={messages.length} onChanged={load} compact={compact} />
+  );
 
   return (
     <main className="page">
       <header className="stack">
-        <p className="eyebrow">Dad&apos;s Typing...</p>
         <h1>{view.title}</h1>
+        <Stepper stage={stage} />
         <div className="next" role="status" aria-live="polite">
           <strong>{copy.headline}</strong>
           <p>{copy.detail}</p>
         </div>
-        <p className="muted small" role="status" aria-live="polite">
-          {offline ? "Connection lost. Trying again..." : updating ? "Updating..." : "Up to date"}
-          {" · "}You can: {roles.join(", ")}
-        </p>
+        {offline && <p className="muted small" role="status">Connection lost. Trying again...</p>}
+        {!offline && updating && <span className="sr-only" role="status">Updating</span>}
       </header>
-
-      {sel && (
-        <section className="card selection" aria-labelledby="sel-h">
-          <h2 id="sel-h">Chosen: {sel.title}</h2>
-          <p>From {sel.seller}{sel.reason ? ` · Reason: ${sel.reason}` : ""}</p>
-          {sel.stale && <p className="error">The requirements changed after this choice. Please choose again.</p>}
-          {sel.route === "external" && extOffer?.url && (
-            <a className="small" href={extOffer.url} target="_blank" rel="noopener noreferrer">See the listing at the store</a>
-          )}
-        </section>
-      )}
-
-      {view.fulfilment && <StatusTimeline taskId={taskId} token={token} f={view.fulfilment} onChanged={load} />}
-
-      {view.receipt && (
-        <section className="card receipt" aria-labelledby="rc-h">
-          <h2 id="rc-h">Receipt</h2>
-          <dl className="facts">
-            <dt>Seller</dt><dd>{view.receipt.seller}</dd>
-            <dt>Item</dt><dd>{view.receipt.title}</dd>
-            <dt>SKU</dt><dd>{view.receipt.sku}</dd>
-            <dt>Total paid</dt><dd><strong>{formatMoney(view.receipt.totalMinor, view.receipt.currency)}</strong></dd>
-            {!!view.receipt.refundedMinor && (<><dt>Refunded</dt><dd>{formatMoney(view.receipt.refundedMinor, view.receipt.currency)}</dd></>)}
-            {!!view.receipt.refundPendingMinor && (<><dt>Refund pending</dt><dd>{formatMoney(view.receipt.refundPendingMinor, view.receipt.currency)}</dd></>)}
-          </dl>
-          <p className="muted small">Sandbox payment. Demo shop.</p>
-        </section>
-      )}
-
-      <Chat taskId={taskId} token={token} messages={messages} serverProposals={serverProposals} canSend={canDo(roles, "message")}
-        canConfirm={canDo(roles, "confirm_requirement")} onChanged={load}
-        onSent={(m) => setMessages((old) => mergeMsgs(old, m))} />
-
-      <SharedSources taskId={taskId} token={token} canEdit={canDo(roles, "message")} refreshKey={messages.length} onChanged={load} />
-
-      <section className="card stack" aria-labelledby="req-h">
-        <h2 id="req-h">What we need</h2>
-        {view.requirements.length === 0 && <p className="muted">Nothing confirmed yet.</p>}
-        <ul className="reqs">
-          {view.requirements.map((r) => (
-            <li key={r.id}>
-              <span>{requirementLabel(r)}</span>
-              <span className="tag">{r.essential ? "Essential" : "Preference"}</span>
-              <span className="tag">{r.status === "confirmed" ? "Confirmed" : "Waiting to be confirmed"}</span>
-              {r.status === "proposed" && canDo(roles, "confirm_requirement") && (
-                <button className="btn small-btn" onClick={() => confirmReq(r.id)}>Confirm</button>
-              )}
-            </li>
-          ))}
-        </ul>
-        <p role="alert" className="error">{reqErr}</p>
-      </section>
 
       {choiceErr && (
         <div className="note" role="alert">
@@ -182,27 +152,65 @@ export default function TaskPage({ taskId }: { taskId: string }) {
           {choiceErr.stale && <button className="btn" onClick={() => { setChoiceErr(null); void load(); }}>Refresh</button>}
         </div>
       )}
-      {cmp && !view.order ? (
-        <DeliveredCards taskId={taskId} token={token} refreshKey={cmp.version * 1000 + cmp.offers.length} canEdit={canDo(roles, "message")} canChoose={chooseOn}
-          busy={choosing} excluded={cmp.offers.filter((o) => o.status === "ineligible")}
-          onChoose={(id) => { const o = cmp.offers.find((x) => x.id === id); if (o) void choose(o); }} />
-      ) : (
-        <Comparison offers={cmp?.offers ?? []} canChoose={false} busyId={choosing} disabled onChoose={choose} />
+      <p role="alert" className="error">{reqErr}</p>
+
+      {stage === "find" && (
+        <>
+          {sources(false)}
+          {chat(false)}
+          {must}
+          <ShareMenu taskId={taskId} token={token} roles={roles} stage={stage} />
+        </>
       )}
 
-      {canDo(roles, "invite") && (
-        <section className="card stack" aria-labelledby="ask-h">
-          <h2 id="ask-h">Ask someone</h2>
-          <ShareInvite taskId={taskId} token={token} roles={["requester", "chooser"]} label="Mum"
-            buttonText="Send to Mum" hint="Mum can ask questions, correct details and choose herself." />
-          <ShareInvite taskId={taskId} token={token} roles={["helper"]} label="Helper"
-            buttonText="Make a helper link" hint="A helper can chat and suggest details, but cannot choose or pay." />
-          <ShareInvite taskId={taskId} token={token} roles={["payer"]} label="Payer"
-            buttonText="Make a payer link" hint="The payer can review the order and pay in PayPal." />
-        </section>
+      {stage === "choose" && (
+        <>
+          {must}
+          {canDo(roles, "choose") ? cards : cards && <details className="card more"><summary>See the options</summary>{cards}</details>}
+          {sources(true)}
+          {chatBar}
+          <ShareMenu taskId={taskId} token={token} roles={roles} stage={stage} />
+        </>
       )}
 
-      {showPayer && <PayerPanel taskId={taskId} token={token} view={view} onChanged={load} />}
+      {stage === "pay" && sel && (
+        <>
+          {canPay ? <PayerPanel taskId={taskId} token={token} view={view} onChanged={load} /> : (
+            <section className="card stack"><h2>Chosen: {sel.title}</h2><p className="small">From {sel.seller}</p></section>
+          )}
+          {sel.route === "external" && extOffer?.url && (
+            <a className="small" href={extOffer.url} target="_blank" rel="noopener noreferrer">See the listing at the store</a>
+          )}
+          <ShareMenu taskId={taskId} token={token} roles={roles} stage={stage} />
+          {chooseOn && cards && <details className="card more"><summary>Change my choice</summary>{cards}</details>}
+          {chatBar}
+        </>
+      )}
+
+      {stage === "track" && (
+        <>
+          {view.fulfilment ? (
+            <StatusTimeline taskId={taskId} token={token} f={view.fulfilment} onChanged={load}
+              extra={canPay ? <TopupPay taskId={taskId} token={token} view={view} /> : null} />
+          ) : view.nextAction === "paid" && <section className="card stack"><h2>Paid</h2><p>The seller delivers it; the receipt is below.</p></section>}
+          {view.receipt && (
+            <details className="card more receipt">
+              <summary>Receipt · {formatMoney(view.receipt.totalMinor, view.receipt.currency)} paid</summary>
+              <dl className="facts">
+                <dt>Seller</dt><dd>{view.receipt.seller}</dd>
+                <dt>Item</dt><dd>{view.receipt.title}</dd>
+                <dt>Total paid</dt><dd><strong>{formatMoney(view.receipt.totalMinor, view.receipt.currency)}</strong></dd>
+                {!!view.receipt.refundedMinor && (<><dt>Refunded</dt><dd>{formatMoney(view.receipt.refundedMinor, view.receipt.currency)}</dd></>)}
+                {!!view.receipt.refundPendingMinor && (<><dt>Refund pending</dt><dd>{formatMoney(view.receipt.refundPendingMinor, view.receipt.currency)}</dd></>)}
+              </dl>
+              <p className="muted small">PayPal Sandbox payment.</p>
+            </details>
+          )}
+          {chatBar}
+        </>
+      )}
+
+      <p className="muted small">Demo: this chat runs in your browser. Payments use PayPal Sandbox.</p>
     </main>
   );
 }

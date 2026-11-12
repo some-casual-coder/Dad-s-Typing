@@ -30,6 +30,16 @@ export interface SharedSource {
   id: string; platform: string; label: string; kind: string; openUrl: string; status: string; reason: string | null;
   evidence: string[]; candidates: Candidate[];
 }
+export interface OrderPreview {
+  selectionId: string;
+  order?: OrderView;
+  quote?: {
+    kind: "merchant" | "concierge"; title: string; seller: string; currency: string; totalMinor: number;
+    itemMinor?: number; shippingMinor?: number; estimateMinor?: number; provider?: string; rule?: string;
+    kesPerUsdMicro?: number | null; arrival?: string | null;
+    lines?: { label: string; status: string; currency: string; minor: number | null; highMinor: number | null }[];
+  };
+}
 export interface Fulfilment {
   notices: Notice[];
   arrival: string | null; next: string[]; canCancel: boolean;
@@ -52,6 +62,7 @@ export interface TaskView {
   selection: { id: string; stale: boolean; title: string; seller: string; route: string; reason: string; chosenAt: string } | null;
   order: OrderView | null; receipt: Receipt | null; fulfilment: Fulfilment | null;
   topup?: { id: string; totalMinor: number; currency: string; status: string } | null;
+  identified?: boolean;
 }
 export interface Check { key: string; essential: boolean; result: "match" | "mismatch" | "unknown"; reason: string }
 export interface Offer {
@@ -153,8 +164,9 @@ export const api = {
   select: (id: string, token: string, offerId: string, expectedVersion: number) =>
     call<{ selectionId: string }>("POST", `${t(id)}/selection`,
       { token, body: { offerId, expectedVersion }, idem: true }),
-  createOrder: (id: string, token: string, selectionId: string) =>
-    call<OrderView>("POST", `${t(id)}/order`, { token, body: { selectionId } }),
+  createOrder: (id: string, token: string, selectionId: string, expectedTotalMinor?: number) =>
+    call<OrderView>("POST", `${t(id)}/order`, { token, body: { selectionId, expectedTotalMinor } }),
+  previewOrder: (id: string, token: string) => call<OrderPreview>("GET", `${t(id)}/order`, { token }),
   payCreate: (id: string, token: string, orderId: string) =>
     call<{ attemptId: string; paypalOrderId: string; approveUrl: string }>(
       "POST", `${t(id)}/pay/create`, { token, body: { orderId } }),

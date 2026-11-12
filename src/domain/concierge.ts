@@ -52,12 +52,20 @@ export function usdRange(cs: Component[], fx: FxTable): { low: number; high: num
 export interface Frozen { plan: Plan; fx: FxTable; snap: { offerId: string; title: string; sourceOfferId?: string } }
 
 // Called inside createSellerOrder's transaction with a freshly computed plan
-export async function freezeConcierge(c: Tx, taskId: string, selectionId: string, grantId: string, f: Frozen) {
-  const p = f.plan;
+// What one payment would charge for this plan, without freezing anything
+export function conciergeQuote(p: Plan, fx: FxTable) {
   if (p.provider !== "kentex" && p.provider !== "aquantuo") throw new DomainError("not_payable", "This option is bought at the store");
   if (!p.complete || p.availability !== "available") throw new DomainError("not_payable", "The delivered cost is not confirmed yet, so one payment is not possible");
-  const usd = usdRange(p.components, f.fx);
+  const usd = usdRange(p.components, fx);
   if (!usd || usd.high <= 0) throw new DomainError("not_payable", "This option cannot be paid in one step yet");
+  return usd;
+}
+
+export async function freezeConcierge(c: Tx, taskId: string, selectionId: string, grantId: string, f: Frozen, expectedTotalMinor?: number) {
+  const p = f.plan;
+  const usd = conciergeQuote(p, f.fx);
+  // The payer approved a shown total; anything different needs a fresh look
+  if (expectedTotalMinor !== undefined && expectedTotalMinor !== usd.high) throw new DomainError("stale", "The total changed; please check the new amount");
   const merchant = process.env.PAYPAL_MERCHANT_ID;
   if (!merchant) throw new DomainError("not_payable", "Payments are not configured");
   const item = p.components.find((x) => x.key === "item" && x.currency === "USD")?.minor ?? 0;
@@ -73,7 +81,7 @@ export async function freezeConcierge(c: Tx, taskId: string, selectionId: string
     [id, taskId, f.snap.offerId, p.id.slice(0, 200), p.provider, String(p.mode), Math.max(1, usd.low), usd.high, JSON.stringify(p.components), JSON.stringify(f.fx),
       p.eta ? JSON.stringify(p.eta) : null, p.parcel ? JSON.stringify(p.parcel) : null, SETTLEMENT_RULE],
   );
-  if (p.parcel) await recordEstimate(c, taskId, f.snap.offerId, p.provider, p.parcel);
+  if (p.parcel) await recordEstimate(c, taskId, f.snap.offerId, p.provider as "kentex" | "aquantuo", p.parcel);
   await logEvent(c, taskId, grantId, "order.frozen", { orderId: id, totalMinor: usd.high, kind: "concierge" });
   return row;
 }

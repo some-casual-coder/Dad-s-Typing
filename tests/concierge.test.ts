@@ -207,3 +207,27 @@ describe("one payment for an import (option B, sandbox)", () => {
     await expect(createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId })).rejects.toMatchObject({ code: "not_payable" });
   });
 });
+
+describe("pay: read-only preview, order only on Pay, amount must match", () => {
+  it("previewing creates no order; Pay with the seen total freezes once; a changed total is refused", async () => {
+    gate.payments = mk();
+    const { previewOrder } = await import("@/domain/tasks");
+    const me = await createTask({ title: "Cat carrier", starterRoles: ["requester", "chooser", "payer"], starterLabel: "Me" });
+    await recordOffers(me.taskId, [{ source: "channel3", sourceOfferId: `PV-${key()}`, route: "external", seller: "amazon.com", title: "Sherpa cat carrier",
+      unitPriceMinor: 3000, currency: "USD", availability: "InStock", url: "https://www.amazon.com/dp/B012345678", specs }]);
+    const cmp = await getComparison(me.taskId, me.token);
+    const sel = await selectOffer(me.taskId, me.token, { offerId: cmp.offers[0].id, expectedVersion: cmp.version }, { idempotencyKey: key() });
+    const p1 = await previewOrder(me.taskId, me.token);
+    await previewOrder(me.taskId, me.token);
+    expect(p1.quote).toMatchObject({ kind: "concierge", currency: "USD" });
+    expect((await pool.query(`SELECT count(*)::int n FROM seller_orders WHERE task_id=$1`, [me.taskId])).rows[0].n).toBe(0);
+    await expect(createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId, expectedTotalMinor: p1.quote!.totalMinor + 1 })).rejects.toMatchObject({ code: "stale" });
+    const a = await createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId, expectedTotalMinor: p1.quote!.totalMinor });
+    const b = await createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId, expectedTotalMinor: p1.quote!.totalMinor });
+    expect(b.id).toBe(a.id);
+    expect((await previewOrder(me.taskId, me.token)).order!.id).toBe(a.id);
+    const { createInvite } = await import("@/domain/tasks");
+    const mum = await createInvite(me.taskId, me.token, { roles: ["requester", "chooser"], label: "Mum" });
+    await expect(previewOrder(me.taskId, mum.token)).rejects.toMatchObject({ code: "forbidden" });
+  });
+});

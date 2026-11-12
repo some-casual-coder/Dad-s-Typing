@@ -44,7 +44,7 @@ export default function ShareInvite({ taskId, token, roles, label, buttonText, h
     <div className="stack">
       {hint && <p className="muted">{hint}</p>}
       {!link && (
-        <button className="btn" onClick={create} disabled={busy}>
+        <button className="btn secondary small-btn" onClick={create} disabled={busy}>
           {busy ? "Making link..." : buttonText}
         </button>
       )}

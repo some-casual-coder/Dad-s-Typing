@@ -26,7 +26,7 @@ test("R10: paste a Reel link on a phone, see an honest source card, recover with
   await page.getByLabel("What are you looking for?").fill(REEL);
   await page.getByRole("button", { name: "Start for me" }).click();
   await page.waitForURL(/\/t\/[0-9a-f-]+/);
-  const card = page.getByRole("region", { name: "What you shared" });
+  const card = page.getByRole("region", { name: "Which item?" });
   await expect(card).toBeVisible();
   await expect(card.getByText("Instagram", { exact: true })).toBeVisible();
   await expect(card.getByText(/I can't read the video from a link/)).toBeVisible();
@@ -38,8 +38,12 @@ test("R10: paste a Reel link on a phone, see an honest source card, recover with
   await card.getByLabel("Describe the item").focus();
   await page.keyboard.type("white folding table");
   await page.keyboard.press("Enter");
-  // The description goes through the live model, so allow it time
-  await expect(card.getByText("Added to this task.")).toBeVisible({ timeout: 45_000 });
-  await expect(card.getByText("Your words")).toBeVisible();
+  // The description names the item (live model), so the page moves on to Choose
+  // and the link shrinks to one line that still holds the evidence
+  const line = page.getByText("From your Instagram post · Change item");
+  await expect(line).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByRole("region", { name: "Delivered to Kenya" })).toBeVisible();
+  await line.click();
+  await expect(page.getByText("Your words")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

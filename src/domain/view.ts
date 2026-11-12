@@ -43,6 +43,8 @@ export async function getTaskView(taskId: string, token: string) {
         ? { seller: ord.seller, title: ord.title, sku: ord.sku, currency: ord.currency, totalMinor: ord.total_minor, taskId: t.id, ...refunds }
         : null,
       fulfilment: await timeline(c, t.id, g.roles),
+      // The item is known (named or chosen); before that the page is in Find
+      identified: !!t.search_query || !!sel,
       // A payment above the cap, once the payer approved it
       topup: ord && can(g.roles, "pay") ? await topupFor(c, ord.id) : null,
     };

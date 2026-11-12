@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { authorize, can, canMint, hashToken, newToken, type Role } from "./access";
-import { freezeConcierge } from "./concierge";
+import { formatRange } from "@/delivery/eta";
+import { CONCIERGE_SELLER, conciergeQuote, freezeConcierge, SETTLEMENT_RULE } from "./concierge";
 import { pool, tx, type Tx } from "./db";
 import { DomainError } from "./errors";
 import { evaluate, type Attribute, type Op, type Requirement } from "./eligibility";
@@ -220,7 +221,31 @@ async function conciergePlan(taskId: string, token: string, offerId: string) {
   return plan ? { plan, fx: d.fx } : null;
 }
 
-export async function createSellerOrder(taskId: string, token: string, input: { selectionId: string }) {
+// What the payer would be charged for the current choice. Read-only: no
+// order, no PayPal call; Pay creates both and checks the amount still holds.
+export async function previewOrder(taskId: string, token: string) {
+  await tx((c) => authorize(c, taskId, token, "review_order"));
+  const s = (await pool.query(`SELECT s.id, s.offer_id, s.offer_snapshot FROM selections s WHERE s.task_id=$1 AND s.superseded_at IS NULL`, [taskId])).rows[0];
+  if (!s) throw new DomainError("not_found", "Nothing chosen yet");
+  const existing = (await pool.query(`SELECT * FROM seller_orders WHERE selection_id=$1 AND kind <> 'topup'`, [s.id])).rows[0];
+  if (existing) return { selectionId: s.id as string, order: orderView(existing) };
+  const snap = s.offer_snapshot;
+  if (snap.route === "paypal") {
+    if (!Number.isInteger(snap.unitPriceMinor) || !Number.isInteger(snap.shippingMinor)) throw new DomainError("not_payable", "Delivery or price not confirmed");
+    return { selectionId: s.id as string, quote: { kind: "merchant" as const, title: snap.title as string, seller: snap.seller as string, currency: snap.currency as string,
+      itemMinor: snap.unitPriceMinor as number, shippingMinor: snap.shippingMinor as number, totalMinor: orderTotal(snap.unitPriceMinor, snap.shippingMinor) } };
+  }
+  const imp = await conciergePlan(taskId, token, s.offer_id);
+  if (!imp) throw new DomainError("not_payable", "This option is bought at the store");
+  const usd = conciergeQuote(imp.plan, imp.fx);
+  const eta = imp.plan.eta;
+  return { selectionId: s.id as string, quote: { kind: "concierge" as const, title: snap.title as string, seller: CONCIERGE_SELLER, currency: "USD",
+    totalMinor: usd.high, estimateMinor: usd.low, provider: imp.plan.provider, rule: SETTLEMENT_RULE, kesPerUsdMicro: imp.fx.USD?.kesPerUnitMicro ?? null,
+    arrival: eta ? formatRange(eta.earliest, eta.latest) : null,
+    lines: imp.plan.components.filter((x) => x.status !== "not_applicable").map((x) => ({ label: x.label, status: x.status, currency: x.currency, minor: x.minor ?? null, highMinor: x.highMinor ?? null })) } };
+}
+
+export async function createSellerOrder(taskId: string, token: string, input: { selectionId: string; expectedTotalMinor?: number }) {
   const peek = (await pool.query(`SELECT offer_id, offer_snapshot->>'route' AS route FROM selections WHERE id=$1 AND task_id=$2`, [input.selectionId, taskId])).rows[0];
   const imp = peek?.route === "external" ? await conciergePlan(taskId, token, peek.offer_id) : null;
   return tx(async (c) => {
@@ -237,10 +262,11 @@ export async function createSellerOrder(taskId: string, token: string, input: { 
     if (!quoteUnchanged(snap, live)) throw new DomainError("stale", "The price or stock changed; review again");
     if (snap.route !== "paypal") {
       if (!imp) throw new DomainError("not_payable", "This option is bought at the store");
-      return orderView(await freezeConcierge(c, taskId, s.id, g.id, { plan: imp.plan, fx: imp.fx, snap: { offerId: s.offer_id, title: snap.title } }));
+      return orderView(await freezeConcierge(c, taskId, s.id, g.id, { plan: imp.plan, fx: imp.fx, snap: { offerId: s.offer_id, title: snap.title } }, input.expectedTotalMinor));
     }
     const item = snap.unitPriceMinor, ship = snap.shippingMinor;
     if (!Number.isInteger(item) || !Number.isInteger(ship)) throw new DomainError("not_payable", "Delivery or price not confirmed");
+    if (input.expectedTotalMinor !== undefined && input.expectedTotalMinor !== orderTotal(item, ship)) throw new DomainError("stale", "The total changed; please check the new amount");
     const id = randomUUID();
     const row = (await c.query(
       `INSERT INTO seller_orders (id,task_id,selection_id,created_by,merchant_id,seller,sku,title,quantity,currency,item_minor,shipping_minor,total_minor)

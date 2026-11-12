@@ -1,103 +1,120 @@
 "use client";
-import { useState } from "react";
-import { api, type OrderView, type TaskView } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, ApiError, type OrderPreview, type TaskView } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
-import WhatsAppUpdates from "./WhatsAppUpdates";
 
 interface Props { taskId: string; token: string; view: TaskView; onChanged: () => void }
 
+const kes = (minor: number, micro?: number | null) =>
+  micro ? `about KSh ${(Math.round((minor * micro) / 1e10) * 100).toLocaleString("en-KE")} at today's rate` : null;
+
+// Pay: the exact charge is shown from a read-only preview; the order and the
+// PayPal order are created only when the payer taps Pay, and only for the
+// amount they saw. A changed total needs a fresh look.
 export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
-  const [local, setLocal] = useState<OrderView | null>(null);
+  const [p, setP] = useState<OrderPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const order = view.order ?? local;
+  const [changed, setChanged] = useState(false);
+  const tapping = useRef(false);
   const sel = view.selection;
+  const order = view.order;
 
-  async function review() {
-    if (!sel) return;
-    setBusy(true); setErr("");
-    try { setLocal(await api.createOrder(taskId, token, sel.id)); onChanged(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Could not prepare the order."); }
-    finally { setBusy(false); }
+  const load = useCallback(async () => {
+    if (!sel || order) return;
+    try { setP(await api.previewOrder(taskId, token)); setErr(""); }
+    catch (e) { setErr(e instanceof ApiError ? e.message : "Could not work out the total."); }
+  }, [taskId, token, sel, order]);
+  useEffect(() => { void (async () => { await load(); })(); }, [load]);
+
+  async function goToPayPal(orderId: string) {
+    const r = await api.payCreate(taskId, token, orderId);
+    const host = new URL(r.approveUrl).hostname;
+    if (!/(^|\.)paypal\.com$/.test(host)) throw new Error("Unexpected PayPal address.");
+    window.location.assign(r.approveUrl);
   }
 
-  async function pay(orderId = order?.id) {
-    if (!orderId) return;
-    setBusy(true); setErr("");
+  async function pay() {
+    if (tapping.current || !sel) return;
+    tapping.current = true; setBusy(true); setErr("");
     try {
-      const r = await api.payCreate(taskId, token, orderId);
-      const host = new URL(r.approveUrl).hostname;
-      if (!/(^|\.)paypal\.com$/.test(host)) throw new Error("Unexpected PayPal address.");
-      window.location.assign(r.approveUrl);
+      const id = order?.id ?? (await api.createOrder(taskId, token, sel.id, p?.quote?.totalMinor)).id;
+      await goToPayPal(id);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not start PayPal.");
-      setBusy(false);
+      if (e instanceof ApiError && e.code === "stale") { setChanged(true); await load(); onChanged(); }
+      else setErr(e instanceof Error ? e.message : "Could not start PayPal.");
+      tapping.current = false; setBusy(false);
     }
   }
 
+  if (!sel) return null;
+  const q = p?.quote;
+  const total = order ? { minor: order.totalMinor, currency: order.currency } : q ? { minor: q.totalMinor, currency: q.currency } : null;
+  const concierge = order ? order.kind === "concierge" : q?.kind === "concierge";
+  const c = order?.concierge;
+  const arrival = c?.arrival ?? q?.arrival ?? null;
+  const lines = c?.lines ?? q?.lines;
+
   return (
-    <section className="card stack" aria-labelledby="pay-h">
-      <h2 id="pay-h">Payer <span className="tag">Sandbox</span></h2>
-      <p className="muted small">Sandbox payment: PayPal test mode and a demo shop. No real money moves.</p>
-      {!sel && <p>Waiting for a choice. The payer panel opens once an option is chosen.</p>}
-      {sel && !order && (
+    <section className="card stack pay" aria-labelledby="pay-h">
+      <h2 id="pay-h">Pay <span className="tag">Sandbox</span></h2>
+      <p><strong>{sel.title}</strong></p>
+      {concierge && <p className="small">We buy it through {(c?.provider ?? q?.provider) === "aquantuo" ? "Aquantuo" : "Kentex"} and deliver it to you in Kenya.</p>}
+      {arrival && <p>Arrives {arrival} <span className="muted small">(estimate)</span></p>}
+      {total ? (
         <>
-          <p>Chosen: <strong>{sel.title}</strong> from {sel.seller}.</p>
-          <button className="btn" disabled={busy} onClick={review}>{busy ? "Preparing..." : "Review order"}</button>
+          <p className="price">{concierge ? "Up to " : "Total today: "}{formatMoney(total.minor, total.currency)}</p>
+          {concierge && kes(total.minor, q?.kesPerUsdMicro) && <p className="small muted">{kes(total.minor, q?.kesPerUsdMicro)}</p>}
+          {concierge && (
+            <p className="small">Our estimate is {formatMoney(c?.estimateMinor ?? q?.estimateMinor ?? total.minor, total.currency)} to {formatMoney(total.minor, total.currency)}.
+              {" "}{c?.rule ?? q?.rule}</p>
+          )}
+        </>
+      ) : !err && <p role="status" className="muted">Working out the total...</p>}
+      {changed && <p className="note" role="alert">The total changed since you looked. Check the amount above, then tap Pay again.</p>}
+      {lines && (
+        <details className="more"><summary>What this covers</summary>
+          <ul className="parts small">{lines.map((l, i) => (
+            <li key={i}>{l.label}{l.status === "included" ? ": included" : l.minor !== null
+              ? `: ${formatMoney(l.minor, l.currency)}${l.highMinor && l.highMinor !== l.minor ? ` to ${formatMoney(l.highMinor, l.currency)}` : ""}` : ""}</li>
+          ))}</ul>
+        </details>
+      )}
+      <p className="small"><strong>{concierge ? "Sandbox demonstration: no real order or shipment is booked." : "Sandbox: demo shop, no real money moves."}</strong> PayPal charges in US dollars.</p>
+      {total && (!order || order.status === "awaiting_payer" || order.status === "failed") && (
+        <button className="btn pay" disabled={busy} onClick={pay}>{busy ? "Opening PayPal..." : "Pay with PayPal (sandbox)"}</button>
+      )}
+      {order?.status === "pending" && (
+        <>
+          <p role="status">Checking the payment with PayPal...</p>
+          <button className="btn secondary" disabled={busy} onClick={pay}>Not approved yet? Continue to PayPal</button>
         </>
       )}
-      {order?.concierge && (
-        <>
-          <p>We buy <strong>{order.title}</strong> through {order.concierge.provider === "kentex" ? "Kentex" : "Aquantuo"} and deliver it to you in Kenya.</p>
-          {order.concierge.arrival && <p>Arrives <strong>{order.concierge.arrival}</strong>.</p>}
-          <p className="price">Up to {formatMoney(order.totalMinor, order.currency)}</p>
-          <p className="small">Our estimate is {formatMoney(order.concierge.estimateMinor, order.currency)} to {formatMoney(order.concierge.capMinor, order.currency)}. {order.concierge.rule}</p>
-          <details className="more"><summary>What this covers</summary>
-            <ul className="parts small">{order.concierge.lines.map((l, i) => (
-              <li key={i}>{l.label}{l.status === "included" ? ": included" : l.minor !== null
-                ? `: ${formatMoney(l.minor, l.currency)}${l.highMinor && l.highMinor !== l.minor ? ` to ${formatMoney(l.highMinor, l.currency)}` : ""}` : ""}</li>
-            ))}</ul>
-          </details>
-          <p className="small"><strong>Sandbox demonstration: no real order or shipment is booked.</strong> In live use an operator would place the order with the provider. PayPal charges in US dollars.</p>
-          <WhatsAppUpdates taskId={taskId} token={token} />
-        </>
-      )}
-      {order && (
-        <>
-          {!order.concierge && <dl className="facts">
-            <dt>Item</dt><dd>{order.title}</dd>
-            <dt>SKU</dt><dd>{order.sku}</dd>
-            <dt>Seller</dt><dd>{order.seller}</dd>
-            <dt>Quantity</dt><dd>{order.quantity}</dd>
-            <dt>Item price</dt><dd>{formatMoney(order.itemMinor, order.currency)}</dd>
-            <dt>Delivery</dt><dd>{formatMoney(order.shippingMinor, order.currency)}</dd>
-            <dt>Total</dt><dd><strong>{formatMoney(order.totalMinor, order.currency)}</strong></dd>
-          </dl>}
-          {order.status === "awaiting_payer" && (
-            <button className="btn pay" disabled={busy} onClick={() => pay()}>
-              {busy ? "Opening PayPal..." : "Pay with PayPal (sandbox)"}
-            </button>
-          )}
-          {order.status === "pending" && (
-            <>
-              <p role="status">Checking the payment with PayPal...</p>
-              <button className="btn" disabled={busy} onClick={() => pay()}>Not approved yet? Continue to PayPal</button>
-            </>
-          )}
-          {order.status === "paid" && <p role="status">Paid.</p>}
-          {view.topup && view.topup.status !== "paid" && (
-            <div className="note stack">
-              <p>You approved an extra {formatMoney(view.topup.totalMinor, view.topup.currency)} for the final shipping bill.</p>
-              <button className="btn pay" disabled={busy} onClick={() => pay(view.topup!.id)}>{busy ? "Opening PayPal..." : "Pay the extra with PayPal (sandbox)"}</button>
-            </div>
-          )}
-          {view.topup?.status === "paid" && <p role="status">Extra paid: {formatMoney(view.topup.totalMinor, view.topup.currency)}.</p>}
-          {!!order.refundedMinor && <p role="status">Refunded: {formatMoney(order.refundedMinor, order.currency)}</p>}
-          {!!order.refundPendingMinor && <p role="status">Refund pending: {formatMoney(order.refundPendingMinor, order.currency)}</p>}
-          {order.status === "failed" && <p className="error">The payment did not go through. You can review the order again.</p>}
-        </>
-      )}
+      {order?.status === "failed" && <p className="error">The payment did not go through. You can try again.</p>}
       <p role="alert" className="error">{err}</p>
     </section>
+  );
+}
+
+// An approved extra above the cap: one block to pay it, after payment
+export function TopupPay({ taskId, token, view }: { taskId: string; token: string; view: TaskView }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const t = view.topup;
+  if (!t) return null;
+  if (t.status === "paid") return <p role="status" className="small">Extra paid: {formatMoney(t.totalMinor, t.currency)}.</p>;
+  return (
+    <div className="note stack">
+      <p>You approved an extra {formatMoney(t.totalMinor, t.currency)} for the final shipping bill.</p>
+      <button className="btn pay" disabled={busy} onClick={async () => {
+        setBusy(true); setErr("");
+        try {
+          const r = await api.payCreate(taskId, token, t.id);
+          if (!/(^|\.)paypal\.com$/.test(new URL(r.approveUrl).hostname)) throw new Error("Unexpected PayPal address.");
+          window.location.assign(r.approveUrl);
+        } catch (e) { setErr(e instanceof Error ? e.message : "Could not start PayPal."); setBusy(false); }
+      }}>{busy ? "Opening PayPal..." : "Pay the extra with PayPal (sandbox)"}</button>
+      <p role="alert" className="error">{err}</p>
+    </div>
   );
 }

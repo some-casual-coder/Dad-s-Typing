@@ -85,3 +85,19 @@ export function variantText(v: unknown): string {
   if (typeof v === "object") return Object.values(v as Record<string, unknown>).filter((x) => typeof x === "string" || typeof x === "number").join(", ");
   return "";
 }
+
+// One status line per stage, in the viewer's terms; no role names
+export function stageCopy(stage: "find" | "choose" | "pay" | "track", a: NextAction, r: { canPay: boolean; canChoose: boolean }): { headline: string; detail: string } {
+  if (a === "cancelled") return { headline: "Cancelled", detail: "Nothing more will be charged." };
+  switch (stage) {
+    case "find": return r.canChoose ? { headline: "What are we finding?", detail: "Send a photo, a link or a few words." }
+      : { headline: "Waiting for the item", detail: "The person shopping is still finding it." };
+    case "choose": return r.canChoose ? { headline: "Choose one", detail: "Prices are estimates that include delivery to Kenya, unless marked." }
+      : { headline: "Waiting for the choice", detail: "You'll be able to pay once something is chosen." };
+    case "pay":
+      if (a === "checking_payment") return { headline: "Checking the payment", detail: "PayPal is confirming it. This can take a moment." };
+      return r.canPay ? { headline: "Pay once", detail: "Check the total, then pay in PayPal (sandbox)." }
+        : { headline: "Sent to be paid", detail: "You'll see the arrival date here once it's paid." };
+    case "track": return { headline: "Paid", detail: "Here's where it is and when it should arrive." };
+  }
+}

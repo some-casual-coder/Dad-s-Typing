@@ -68,7 +68,8 @@ test("wrong format is refused with copy; server-rejected bytes retry safely", as
   await choose(page, "Replace photo", JPG);
   await page.getByRole("button", { name: "Start with this photo" }).click();
   await page.waitForURL(/\/t\/[0-9a-f-]+/);
-  await expect(page.getByRole("list", { name: "Messages" }).locator("li.assistant p")).toBeVisible({ timeout: 60_000 });
+  // The reply may sit in the collapsed conversation once options show
+  await expect(page.getByRole("list", { name: "Messages" }).locator("li.assistant p").first()).toBeAttached({ timeout: 60_000 });
   expect(calls.tasks).toBe(1); // the failed attempt's task was reused
 });
 
@@ -77,6 +78,10 @@ test("composer: remove, replace, same-file reselect, typed fallback, keyboard", 
   await page.getByRole("button", { name: "Start for Mum" }).click();
   await page.getByRole("link", { name: "Open the task" }).click();
   await page.waitForURL(/\/t\/[0-9a-f-]+/);
+  // Once options exist the conversation is one bar; open it to compose
+  const bar = page.locator("details.chatbar > summary");
+  await bar.or(page.getByRole("button", { name: "Add photo" })).first().waitFor();
+  if (await bar.count()) await bar.click();
   const calls = track(page);
 
   await choose(page, "Add photo", PNG);
@@ -99,5 +104,6 @@ test("composer: remove, replace, same-file reselect, typed fallback, keyboard", 
   await page.getByRole("button", { name: "Remove photo" }).click();
   await page.getByLabel("Your message").fill("It must open from the top");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.getByRole("list", { name: "Messages" }).locator("li.assistant p")).toBeVisible({ timeout: 60_000 });
+  // The reply may sit in the collapsed conversation once options show
+  await expect(page.getByRole("list", { name: "Messages" }).locator("li.assistant p").first()).toBeAttached({ timeout: 60_000 });
 });

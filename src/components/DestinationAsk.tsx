@@ -35,19 +35,10 @@ export default function DestinationAsk({ taskId, token, dest, canEdit, onChanged
   } else if (dest?.confirmed && dest.handling === "door") {
     body = <p className="small">Delivering to your door in <strong>{label(dest)}</strong>
       {canEdit && <> · {link("Collect instead", () => send({ handling: "pickup", confirm: true }))} · {link("Change", () => setDoor(true))}</>}</p>;
-  } else if (dest?.confirmed || !canEdit) {
-    body = <p className="small">You collect it in <strong>Nairobi</strong> at no extra cost
-      {canEdit && <> · {link("Deliver to my door instead", () => setDoor(true))}</>}</p>;
   } else {
-    body = (
-      <div className="stack ask">
-        <p><strong>Collect it in Nairobi at no extra cost?</strong></p>
-        <div className="row">
-          <button type="button" className="btn" disabled={busy} onClick={() => send({ confirm: true, handling: "pickup" })}>Yes, I&apos;ll collect</button>
-          <button type="button" className="btn secondary" disabled={busy} onClick={() => setDoor(true)}>Deliver to me</button>
-        </div>
-      </div>
-    );
+    // Pickup is the default, stated, not asked; door delivery is one tap
+    body = <p className="small">Collect in <strong>Nairobi</strong>, no extra cost
+      {canEdit && <> · {link("Deliver to my door", () => setDoor(true))}</>}</p>;
   }
   return <>{body}{err && <p role="alert" className="error">{err}</p>}</>;
 }

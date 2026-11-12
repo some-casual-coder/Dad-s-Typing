@@ -51,7 +51,7 @@ function Candidates({ list, busy, onChoose }: { list: Candidate[]; busy: boolean
   );
 }
 
-export default function SharedSources({ taskId, token, canEdit, refreshKey, onChanged }: { taskId: string; token: string; canEdit: boolean; refreshKey: number; onChanged: () => void }) {
+export default function SharedSources({ taskId, token, canEdit, refreshKey, onChanged, compact = false }: { taskId: string; token: string; canEdit: boolean; refreshKey: number; onChanged: () => void; compact?: boolean }) {
   const [data, setData] = useState<{ sources: SharedSource[]; uploads: Candidate[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -68,7 +68,7 @@ export default function SharedSources({ taskId, token, canEdit, refreshKey, onCh
     setBusy(true); setMsg("");
     try { await fn(); setMsg(done); await load(); onChanged(); } catch (e) { setMsg(e instanceof ApiError || e instanceof Error ? e.message : "That didn't work."); } finally { setBusy(false); }
   };
-  if (!data || (!data.sources.length && !data.uploads.length)) return canEdit ? <ClipOnly taskId={taskId} token={token} onDone={() => { void load(); onChanged(); }} /> : null;
+  if (!data || (!data.sources.length && !data.uploads.length)) return canEdit && !compact ? <ClipOnly taskId={taskId} token={token} onDone={() => { void load(); onChanged(); }} /> : null;
 
   const screenshot = (f: File) => act(async () => api.sendMessage(taskId, token, { clientMessageId: newId(), imageBase64: await readFile(f), mime: f.type }),
     "Screenshot added to this task.");
@@ -78,9 +78,8 @@ export default function SharedSources({ taskId, token, canEdit, refreshKey, onCh
     if (!r.products) throw new Error(r.noProductReason ?? "No product found in the clip; add a screenshot or describe it.");
   }, "Clip checked.");
 
-  return (
-    <section className="card stack" aria-labelledby="src-h" aria-live="polite">
-      <h2 id="src-h">What you shared</h2>
+  const body = (
+    <>
       {data.sources.map((s) => (
         <div key={s.id} className="stack source">
           <p><span className="tag">{s.label}</span> <a href={s.openUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Open original</a></p>
@@ -108,6 +107,22 @@ export default function SharedSources({ taskId, token, canEdit, refreshKey, onCh
         </div>
       )}
       {msg && <p role="status" className="small">{msg}</p>}
+    </>
+  );
+  // Once the item is known the source shrinks to one line
+  if (compact) {
+    const first = data.sources[0];
+    return (
+      <details className="card more">
+        <summary>{first ? `From your ${first.label} post` : "From your clip"} · Change item</summary>
+        <div className="stack" aria-live="polite">{body}</div>
+      </details>
+    );
+  }
+  return (
+    <section className="card stack" aria-labelledby="src-h" aria-live="polite">
+      <h2 id="src-h">Which item?</h2>
+      {body}
     </section>
   );
 }

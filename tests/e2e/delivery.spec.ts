@@ -19,6 +19,8 @@ test("delivered-to-Kenya cards: pickup by default, door on request, price, date,
       `INSERT INTO offers (id,task_id,source,source_offer_id,route,seller,title,unit_price_minor,currency,availability,url,specs)
        VALUES ($1,$2,'channel3','E2E-1','external','amazon.com','Fixture cat carrier',3000,'USD','InStock','https://www.amazon.com/dp/B012345678',$3)`,
       [randomUUID(), taskId, JSON.stringify(specs)]);
+    // As if the shopper had named the item, which moves the task to Choose
+    await db.query(`UPDATE tasks SET search_query='cat carrier' WHERE id=$1`, [taskId]);
   } finally { await db.end(); }
   await page.goto("/");
   await page.evaluate(([id, t]) => sessionStorage.setItem(`dt:token:${id}`, t), [taskId, token]);
@@ -26,14 +28,12 @@ test("delivered-to-Kenya cards: pickup by default, door on request, price, date,
 
   const panel = page.getByRole("region", { name: "Delivered to Kenya" });
   await expect(panel).toBeVisible();
-  // No form by default: one question with a default
+  // No form and no question: pickup is stated, door is one tap away
   await expect(panel.getByRole("textbox")).toHaveCount(0);
-  await expect(panel.getByText("Collect it in Nairobi at no extra cost?")).toBeVisible();
-  await panel.getByRole("button", { name: "Yes, I'll collect" }).click();
-  await expect(panel.getByText("You collect it in")).toBeVisible();
+  await expect(panel.getByText(/Collect in\s*Nairobi, no extra cost/)).toBeVisible();
   const pickupPrice = await panel.locator("li.dcard", { hasText: "Fixture cat carrier" }).locator(".price").textContent();
   // Door delivery is one tap and a town away, and costs more
-  await panel.getByRole("button", { name: "Deliver to my door instead" }).click();
+  await panel.getByRole("button", { name: "Deliver to my door" }).click();
   await panel.getByLabel("Town or area to deliver to").fill("Kilimani");
   await panel.getByRole("button", { name: "Save" }).click();
   await expect(panel.getByText("Delivering to your door in")).toBeVisible();
@@ -50,5 +50,9 @@ test("delivered-to-Kenya cards: pickup by default, door on request, price, date,
   await expect(card.getByRole("link", { name: "Provider tracking" })).toHaveAttribute("href", /kentexcargo\.com\/tracking/);
 
   await card.getByRole("button", { name: "Choose this one" }).click();
-  await expect(page.getByRole("heading", { name: /Chosen: Fixture cat carrier/ })).toBeVisible();
+  // Straight to Pay: the exact total and one button, no order created yet
+  const pay = page.getByRole("region", { name: /^Pay/ });
+  await expect(pay.getByText("Fixture cat carrier")).toBeVisible();
+  await expect(pay.getByText(/^Up to USD [\d,.]+$/)).toBeVisible();
+  await expect(pay.getByRole("button", { name: "Pay with PayPal (sandbox)" })).toBeVisible();
 });

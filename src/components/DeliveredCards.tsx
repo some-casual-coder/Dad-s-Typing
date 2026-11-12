@@ -72,8 +72,18 @@ function CardView({ c, plans, canChoose, busy, onChoose, quote }: { c: Card; pla
         </div>
       </div>
       {c.winner && <p className="badge eligible">Best delivered price</p>}
-      <p className="price">{c.price ?? (plan.availability === "needs_quote" ? "Quote required" : "Delivery cost not confirmed")}</p>
-      {c.arrival && <p>Arrives {c.arrival}</p>}
+      {plan.provider === "demo" && plan.complete && plan.knownMinor !== null && plan.knownCurrency ? (
+        <>
+          <p className="price">{formatMoney(plan.knownMinor, plan.knownCurrency)} today</p>
+          {c.price && <p className="small muted">{c.price.replace(/^about /, "about ")} at today&apos;s rate</p>}
+        </>
+      ) : c.price ? (
+        <>
+          <p className="price">{c.price}</p>
+          <p className="small muted">Estimate, includes delivery to Kenya</p>
+        </>
+      ) : <p className="price">{plan.availability === "needs_quote" ? "Shipping quote required" : "Delivery cost not confirmed"}</p>}
+      {c.arrival && <p>Arrives {c.arrival}{plan.provider === "demo" ? " (demo seller, not a real promise)" : ""}</p>}
       <p className="small">{c.difference}</p>
       {canChoose && (
         <button className="btn" disabled={busy !== null} onClick={() => onChoose(c.offerId)}>

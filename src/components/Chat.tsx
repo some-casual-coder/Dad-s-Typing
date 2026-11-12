@@ -24,7 +24,7 @@ const readBase64 = (f: File) => new Promise<string>((res, rej) => {
   r.readAsDataURL(f);
 });
 
-export default function Chat({ taskId, token, messages, serverProposals = [], canSend, canConfirm, onChanged, onSent }: Props) {
+export default function Chat({ taskId, token, messages, serverProposals = [], canSend, canConfirm, onChanged, onSent, bare = false }: Props & { bare?: boolean }) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [alt, setAlt] = useState("");
@@ -92,9 +92,8 @@ export default function Chat({ taskId, token, messages, serverProposals = [], ca
   }
 
   return (
-    <section className="card stack" aria-labelledby="chat-h">
-      <h2 id="chat-h">Chat</h2>
-      <p className="muted small">Chat simulated in your browser. This is not WhatsApp.</p>
+    <section className={bare ? "stack" : "card stack"} aria-label="Chat">
+      {!bare && <h2>Chat</h2>}
 
       <ol className="messages" ref={listRef} aria-label="Messages">
         {messages.length === 0 && <li className="muted">No messages yet. Say what you are looking for.</li>}
@@ -144,13 +143,13 @@ export default function Chat({ taskId, token, messages, serverProposals = [], ca
             <VoiceRecorder taskId={taskId} token={token} disabled={busy}
               onTranscript={(t) => setText((old) => (old.trim() ? `${old.trim()} ${t}` : t))} />
             <div className="row actions-row">
-              <button className="btn" type="submit" disabled={busy || (!text.trim() && !file)}>
+              <button className={bare ? "btn secondary" : "btn"} type="submit" disabled={busy || (!text.trim() && !file)}>
                 {busy ? "Sending..." : "Send"}
               </button>
             </div>
           </div>
         </form>
-      ) : <p className="muted">Your link does not allow sending messages.</p>}
+      ) : <p className="muted small">This link can read the conversation but not send messages.</p>}
       <p role="status" aria-live="polite" className="muted">{info}</p>
       <p role="alert" className="error">{err}</p>
     </section>
