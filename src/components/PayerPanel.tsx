@@ -58,7 +58,7 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
                 ? `: ${formatMoney(l.minor, l.currency)}${l.highMinor && l.highMinor !== l.minor ? ` to ${formatMoney(l.highMinor, l.currency)}` : ""}` : ""}</li>
             ))}</ul>
           </details>
-          <p className="muted small">Sandbox demonstration: an operator places the order with the provider. PayPal charges in US dollars.</p>
+          <p className="small"><strong>Sandbox demonstration: no real order or shipment is booked.</strong> In live use an operator would place the order with the provider. PayPal charges in US dollars.</p>
           <WhatsAppUpdates taskId={taskId} token={token} />
         </>
       )}
