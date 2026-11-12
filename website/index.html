@@ -239,15 +239,11 @@ section { scroll-margin-top: 72px; }
 .prep ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
 .prep li { display: grid; grid-template-columns: auto 1fr; gap: 10px; }
 .prep li::before { content: ""; width: .7em; height: .7em; margin-top: .45em; border-radius: 50%; background: var(--lilac); }
-.code {
-  background: color-mix(in srgb, var(--paper) 10%, transparent); border: 1px solid color-mix(in srgb, var(--on-green) 25%, transparent);
-  border-radius: 14px; padding: 14px 16px; font: 500 .9rem/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow-x: auto;
-}
-.code pre { margin: 0; white-space: pre; }
-.copy {
-  background: var(--lilac); color: var(--ink); border: 0; border-radius: 999px; padding: .55em 1.1em;
-  font: 600 .85rem/1 var(--body); cursor: pointer;
-}
+.btn-wa { background: var(--lilac); color: var(--ink); border-color: var(--lilac); }
+.btn-wa:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--lilac) 85%, var(--on-green)); }
+.btn-light { background: transparent; color: var(--on-green); border-color: color-mix(in srgb, var(--on-green) 55%, transparent); }
+.btn-light:hover { background: color-mix(in srgb, var(--on-green) 10%, transparent); }
+.guide .aside { font-size: .92rem; color: color-mix(in srgb, var(--on-green) 75%, transparent); }
 .walk { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: w; }
 .walk li {
   counter-increment: w; border-radius: 18px; background: color-mix(in srgb, var(--paper) 8%, transparent);
@@ -493,11 +489,13 @@ footer .wrap { display: grid; gap: 18px; }
           <li>A PayPal Sandbox personal buyer login. It’s a test account, so no real money moves.</li>
           <li>A photo of what you want. No photo? The app has a sample carrier drawing to download.</li>
         </ul>
-        <h3>Start the app</h3>
-        <div class="code" id="cmds"><pre>docker start dads-typing-pg
-npm run build &amp;&amp; npx next start -p 3000</pre></div>
-        <div><button class="copy" id="copy" type="button">Copy commands</button> <span id="copied" role="status" aria-live="polite"></span></div>
-        <p>Then open <strong>localhost:3000</strong> in your normal window.</p>
+        <h3>Try it live</h3>
+        <p>Chat with My Plug on WhatsApp. Your first message is already typed: just press send, and it replies with how it works.</p>
+        <div class="ctas">
+          <a class="btn btn-wa" href="https://wa.me/254102307457?text=Hi%20My%20Plug!%20I%27d%20like%20to%20try%20it%20out." target="_blank" rel="noopener">Chat with My Plug</a>
+          <a class="btn btn-light" href="https://dads-typing.onrender.com" target="_blank" rel="noopener">Open the web app</a>
+        </div>
+        <p class="aside">The steps on the right use the web app. Open it in your normal window.</p>
       </div>
 
       <ol class="walk">
@@ -630,17 +628,6 @@ npm run build &amp;&amp; npx next start -p 3000</pre></div>
     io.observe(chat);
   }
 
-  // Copy the start commands
-  const btn = document.getElementById("copy"), note = document.getElementById("copied");
-  btn.addEventListener("click", async () => {
-    const pre = document.querySelector("#cmds pre");
-    try { await navigator.clipboard.writeText(pre.textContent); note.textContent = "Copied"; }
-    catch {
-      const r = document.createRange(); r.selectNodeContents(pre);
-      const s = getSelection(); s.removeAllRanges(); s.addRange(r); note.textContent = "Selected; press Ctrl+C or ⌘C";
-    }
-    setTimeout(() => { note.textContent = ""; }, 2500);
-  });
 })();
 </script>
 </body>
