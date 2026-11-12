@@ -12,6 +12,7 @@ import { getDelivery } from "@/domain/delivery";
 import { claimExternalSearch } from "@/domain/offers";
 import { createInvite, createSellerOrder, createTask, getComparison, selectOffer } from "@/domain/tasks";
 import { getTaskView } from "@/domain/view";
+import { findLinks, LABEL, withoutSocialLinks } from "@/sources/recognize";
 import { deriveChannelToken, senderHash } from "./bridge";
 import { admitted, handleJoinOrStop } from "./join";
 import { menuCards, renderChosen, renderOptions } from "./render";
@@ -132,9 +133,22 @@ export function composeReply(o: { reply: string; extra?: string[]; proposals: { 
 const link = (taskId: string, token: string) => `${process.env.APP_BASE_URL ?? "http://localhost:3000"}/t/${taskId}#k=${token}`;
 
 // An image starts a new task; text continues the latest open one, else starts one
+// A photo continues the latest task only when it is the screenshot that task
+// asked for (a shared link it could not read, nothing chosen or paid yet)
+async function awaitingScreenshot(taskId: string) {
+  return !!(await tx((c) => c.query(
+    `SELECT 1 FROM shared_sources s WHERE s.task_id=$1 AND s.status IN ('preview_only','needs_input','unavailable','retryable_error','unsupported')
+       AND s.created_at > now() - interval '1 day'
+       AND NOT EXISTS (SELECT 1 FROM product_candidates k WHERE k.task_id=s.task_id AND k.status='chosen')
+       AND NOT EXISTS (SELECT 1 FROM seller_orders o WHERE o.task_id=s.task_id)`, [taskId]))).rowCount;
+}
+
 async function resolveTask(channel: string, row: Row, hasImage: boolean) {
   const hash = senderHash(channel, row.sender as string);
-  const existing = !hasImage ? (await tx((c) => c.query(`SELECT task_id, grant_id FROM channel_identities WHERE channel=$1 AND sender_hash=$2`, [channel, hash]))).rows[0] : undefined;
+  // A new shared post is a new thing to buy, like a new photo
+  const newLink = findLinks((row.body as string) ?? "").some((f) => f.type === "social");
+  const latest = (await tx((c) => c.query(`SELECT task_id, grant_id FROM channel_identities WHERE channel=$1 AND sender_hash=$2`, [channel, hash]))).rows[0];
+  const existing = newLink ? undefined : !hasImage ? latest : latest && (await awaitingScreenshot(latest.task_id)) ? latest : undefined;
   if (existing) {
     const token = deriveChannelToken(channel, existing.grant_id);
     const v = await getTaskView(existing.task_id, token).catch(() => null);
@@ -148,7 +162,10 @@ async function resolveTask(channel: string, row: Row, hasImage: boolean) {
     const g = (await tx((c) => c.query(`SELECT grant_id FROM channel_identities WHERE channel=$1 AND sender_hash=$2 AND task_id=$3`, [channel, hash, row.task_id]))).rows[0];
     if (g) return { taskId: row.task_id as string, token: deriveChannelToken(channel, g.grant_id), fresh: true, dest: "none" as const };
   }
-  const title = ((row.body as string) || `Request from ${getChannel(channel).label}`).replace(/\s+/g, " ").slice(0, 80);
+  const link = findLinks((row.body as string) ?? "").find((f) => f.type === "social");
+  const said = withoutSocialLinks((row.body as string) ?? "");
+  const title = (said || (link?.type === "social" ? `Shared ${LABEL[link.ref.platform]} post` : `Request from ${getChannel(channel).label}`))
+    .replace(/\s+/g, " ").slice(0, 80);
   let dest = "none" as "known" | "ask" | "none";
   const made = await createTask({
     title, starterRoles: ["requester", "chooser", "helper", "payer"], starterLabel: getChannel(channel).label, grantTtlDays: GRANT_DAYS, deriveToken: (id) => deriveChannelToken(channel, id),
@@ -286,8 +303,9 @@ async function processRow(channel: string, row: Row) {
   await tx((c) => subscribe(c, taskId, channel, senderHash(channel, row.sender as string), row.sender as string, true));
   const ex = await postExchange(taskId, token, { channel, key: `${channel}:${row.provider_message_id}`, text: (row.body as string) || undefined, image });
   // No item named by the AI: search the words they sent, once
-  if (fresh && row.body && (await claimExternalSearch(taskId, row.body as string)))
-    await seedExternalOffers(taskId, (row.body as string).slice(0, 80)).catch(() => console.error("channel_error", "seed_external"));
+  const words = withoutSocialLinks((row.body as string) ?? "");
+  if (fresh && words && (await claimExternalSearch(taskId, words)))
+    await seedExternalOffers(taskId, words.slice(0, 80)).catch(() => console.error("channel_error", "seed_external"));
   const reply = ex.messages.find((m) => m.role === "assistant")?.body ?? "";
   const known = dest === "known" ? await tx((c) => getDestination(c, taskId)) : null;
   const where = dest === "ask" ? askLine() : known

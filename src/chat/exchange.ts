@@ -3,8 +3,9 @@ import { AdapterError, type Interpretation } from "@/adapters/types";
 import { DomainError } from "@/domain/errors";
 import { getExchange, recordAssistantMessage } from "@/domain/messages";
 import { addMessage, getComparison } from "@/domain/tasks";
-import { seedExternalOffers } from "@/catalog/demo";
 import { claimExternalSearch } from "@/domain/offers";
+import { intakeLinks, searchFor } from "@/sources/flow";
+import { submitPending } from "@/sources/intake";
 
 export const FALLBACK = "I could not read that, please describe it.";
 
@@ -37,26 +38,35 @@ export async function postExchange(taskId: string, token: string, input: Exchang
     if (done.messages.length < 2) throw new DomainError("conflict", "Still working on that message; send it again in a moment");
     return done;
   }
+  // A shared social link is a reference, recorded once per task; the model
+  // only ever sees the shopper's own words, never the post URL
+  const intake = await intakeLinks(taskId, input.key, input.text ?? "", !!input.image);
+  const words = intake.words;
   const { requirements } = await getComparison(taskId, token);
   let result: Interpretation | null = null;
-  try {
-    result = await getInterpreter().interpret({
-      text: input.text || undefined,
-      image: input.image,
-      currentRequirements: requirements.map((r) => ({ key: r.key, op: r.op, value: r.value, unit: r.unit })),
-    });
-  } catch (e) {
-    console.error("api_error", "interpret_failed", e instanceof AdapterError ? e.kind : (e as Error)?.name);
+  if (words || input.image) {
+    try {
+      result = await getInterpreter().interpret({
+        text: words || undefined,
+        image: input.image,
+        currentRequirements: requirements.map((r) => ({ key: r.key, op: r.op, value: r.value, unit: r.unit })),
+      });
+    } catch (e) {
+      console.error("api_error", "interpret_failed", e instanceof AdapterError ? e.kind : (e as Error)?.name);
+    }
   }
   const proposals = (result?.proposedRequirements ?? []).slice(0, 10);
   const clarification = result?.clarification ? scrubModelText(result.clarification) || null : null;
-  const reply = (scrubModelText(result?.reply ?? "") || FALLBACK).slice(0, 2000);
+  const said = result ? scrubModelText(result.reply ?? "") || FALLBACK : "";
+  const reply = [said, intake.ack].filter(Boolean).join(" ").slice(0, 2000) || FALLBACK;
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
   const item = result?.item;
   // The browser's next poll picks the offers up; a chat reply cannot be
-  // edited later, so a channel waits for the search on the item the AI named
-  const search = item ? claimExternalSearch(taskId, item).then((first) => (first ? seedExternalOffers(taskId, item) : undefined))
+  // edited later, so a channel waits for the search on the item the AI named.
+  // A task started from a link searches again once the item is known.
+  const search = item ? claimExternalSearch(taskId, item).then((first) => (first || intake.linkTask ? searchFor(taskId, item, first) : undefined))
     .catch(() => console.error("channel_error", "seed_external")) : null;
   if (search && input.channel) await search;
+  for (const id of intake.toSubmit) void submitPending(id).catch(() => console.error("source_error", "submit"));
   return getExchange(taskId, token, input.key, input.channel);
 }

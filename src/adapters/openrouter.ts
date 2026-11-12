@@ -1,4 +1,5 @@
-import { EXTRACT_PROMPT, EXTRACT_SCHEMA, validateExtracted, type Extracted } from "@/delivery/extract";
+import { EXTRACT_PROMPT as QUOTE_PROMPT, EXTRACT_SCHEMA, validateExtracted, type Extracted } from "@/delivery/extract";
+import { CANDIDATE_SCHEMA, EXTRACT_PROMPT, validateExtract, type ExtractOut } from "@/sources/candidates";
 import { SCHEMA, SYSTEM, validateInterpretation, withRetry } from "./gemini";
 import { failFor, jsonOf, MODEL_TIMEOUT_MS, send } from "./http";
 import { AdapterError, type Extractor, type InterpretInput, type Interpretation, type Interpreter } from "./types";
@@ -70,7 +71,7 @@ export class OpenRouterExtractor implements Extractor {
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: this.model, temperature: 0, reasoning: { effort: "low" },
-        messages: [{ role: "system", content: EXTRACT_PROMPT },
+        messages: [{ role: "system", content: QUOTE_PROMPT },
           { role: "user", content: [{ type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}` } }] }],
         response_format: { type: "json_schema", json_schema: { name: "provider_document", schema: EXTRACT_SCHEMA } },
       }),
@@ -87,6 +88,37 @@ export class OpenRouterExtractor implements Extractor {
     }
   }
 }
+
+// Frames the shopper's own clip yielded, to the same candidate shape as the
+// link adapter; frame times are given as data so evidence keeps its timestamp
+export class OpenRouterFrames {
+  constructor(private apiKey: string, private model: string) {
+    if (!apiKey || !model) throw new AdapterError("unavailable", "OpenRouter is not configured");
+  }
+
+  async analyze(frames: { atS: number; base64: string }[]): Promise<ExtractOut> {
+    const content: object[] = [{ type: "text", text: `Frames from one short video the shopper uploaded, in order. Times (data): ${frames.map((f, i) => `frame ${i + 1} at ${f.atS}s`).join("; ")}.` },
+      ...frames.map((f) => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${f.base64}` } }))];
+    const request = () => send("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST", headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: this.model, temperature: 0, reasoning: { effort: "low" },
+        messages: [{ role: "system", content: `${EXTRACT_PROMPT} Use the frame time as timestamp_seconds for where the product is clearest.` }, { role: "user", content }],
+        response_format: { type: "json_schema", json_schema: { name: "products_in_video", schema: CANDIDATE_SCHEMA } } }),
+    }, MODEL_TIMEOUT_MS);
+    const r = await withRetry(request);
+    if (!r.ok) throw failFor(r.status, "OpenRouter");
+    const j = (await jsonOf(r, "OpenRouter")) as { choices?: { message?: { content?: unknown } }[] };
+    const text = j.choices?.[0]?.message?.content;
+    if (typeof text !== "string") throw new AdapterError("unavailable", "invalid model output: empty");
+    try {
+      return validateExtract(JSON.parse(text), Math.max(...frames.map((f) => f.atS)) + 5);
+    } catch {
+      throw new AdapterError("unavailable", "invalid model output: not JSON");
+    }
+  }
+}
+
+export const framesFromEnv = (env = process.env) => new OpenRouterFrames(env.OPENROUTER_API_KEY ?? "", env.OPENROUTER_MODEL ?? "");
 
 export const extractorFromEnv = (env = process.env): Extractor => new OpenRouterExtractor(env.OPENROUTER_API_KEY ?? "", env.OPENROUTER_MODEL ?? "");
 

@@ -22,6 +22,14 @@ export interface Notice {
   place: { name: string; address: string | null; mapsUrl: string | null; hours: string | null; pin: { approximate: boolean } | null } | null;
   contact: { name: string; phone: string } | null;
 }
+export interface Candidate {
+  id: string; label: string; brand: string | null; model: string | null; attributes: string[]; uncertain: string[];
+  status: string; provenance: string; basis: { type: string; observation: string; at: number | null }[];
+}
+export interface SharedSource {
+  id: string; platform: string; label: string; kind: string; openUrl: string; status: string; reason: string | null;
+  evidence: string[]; candidates: Candidate[];
+}
 export interface Fulfilment {
   notices: Notice[];
   arrival: string | null; next: string[]; canCancel: boolean;
@@ -120,6 +128,10 @@ export const api = {
   addQuote: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/quotes`, { token, body }),
   markStep: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/steps`, { token, body }),
   extractQuote: (id: string, token: string, body: { imageBase64: string; mime: string }) => call<Extracted>("POST", `${t(id)}/delivery/extract`, { token, body }),
+  getSources: (id: string, token: string) => call<{ sources: SharedSource[]; uploads: Candidate[] }>("GET", `${t(id)}/sources`, { token }),
+  chooseCandidate: (id: string, token: string, cid: string) => call<{ ok: true; search: string }>("POST", `${t(id)}/candidates/${cid}`, { token, body: {} }),
+  sourceAction: (id: string, token: string, sid: string, action: "retry" | "something_else") => call<{ ok: true }>("POST", `${t(id)}/sources/${sid}`, { token, body: { action } }),
+  uploadClip: (id: string, token: string, body: { videoBase64: string; mime: string }) => call<{ products: number; noProductReason: string | null }>("POST", `${t(id)}/clips`, { token, body }),
   joinCode: (id: string, token: string) => call<{ code: string; whatsappLink: string | null }>("POST", `${t(id)}/updates`, { token, body: {} }),
   cancelOrder: (id: string, token: string) => call<{ ok: true }>("POST", `${t(id)}/order/cancel`, { token, body: {} }),
   decideExtra: (id: string, token: string, decision: "approved" | "declined") => call<{ ok: true }>("POST", `${t(id)}/order/extra`, { token, body: { decision } }),

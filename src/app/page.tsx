@@ -6,6 +6,7 @@ import ShareInvite from "@/components/ShareInvite";
 import PhotoPicker from "@/components/PhotoPicker";
 import { api, storeToken } from "@/lib/api";
 import { newId, type Role } from "@/lib/format";
+import { findLinks, LABEL, withoutSocialLinks } from "@/sources/recognize";
 
 // Solo is the default: one person can find, choose, pay and track
 const SOLO: Role[] = ["requester", "chooser", "helper", "payer"];
@@ -53,8 +54,13 @@ export default function Home() {
   async function start(starterRoles: Role[], forMum: boolean) {
     setBusy(true); setErr("");
     try {
-      const r = await api.createTask({ title: title.trim() || "Something for Mum", starterRoles });
+      // A pasted post link becomes the task's first message, never its title
+      const link = findLinks(title).find((f) => f.type === "social");
+      const said = link ? withoutSocialLinks(title) : title.trim();
+      const name = said || (link?.type === "social" ? `Shared ${LABEL[link.ref.platform]} post` : "Something for Mum");
+      const r = await api.createTask({ title: name.slice(0, 120), starterRoles, ...(link ? { seedExternal: false } : {}) });
       storeToken(r.taskId, r.token);
+      if (link) await api.sendMessage(r.taskId, r.token, { clientMessageId: newId(), text: title.trim() });
       if (forMum) setCreated(r);
       else router.push(`/t/${r.taskId}`);
     } catch (e) {
@@ -81,7 +87,7 @@ export default function Home() {
             <label className="field">
               <span>What are you looking for?</span>
               <input name="title" value={title} onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. a cat carrier that opens from the top" maxLength={120} />
+                placeholder="e.g. a cat carrier that opens from the top, or paste a TikTok or Instagram link" maxLength={400} />
             </label>
             <button className="btn" disabled={busy} onClick={() => start(SOLO, false)}>
               Start for me

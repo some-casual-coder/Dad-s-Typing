@@ -118,3 +118,6 @@ details { min-width: 0; }
 .notices { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .notice { border-left: 3px solid var(--accent); padding: 6px 10px; display: grid; gap: 4px; background: var(--accent-2); border-radius: 0 10px 10px 0; }
 .notice a { color: var(--accent); font-weight: 700; }
+.cands { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.cand { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: grid; gap: 6px; }
+.source + .source { border-top: 1px solid var(--line); padding-top: 12px; }

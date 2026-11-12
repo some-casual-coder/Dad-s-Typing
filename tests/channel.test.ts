@@ -436,7 +436,7 @@ describe("destination from the sender", () => {
     await send({ image: IMG });
     await send({ text: undefined, location: { lat: -1.2921, lon: 36.7856 } });
     expect((await outbox()).at(-1)).toMatch(/deliver to your door in Kilimani, Nairobi/);
-    const cols = (await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND (column_name ILIKE '%lat%' OR column_name ILIKE '%lon%' OR column_name ILIKE '%coord%')`)).rows;
+    const cols = (await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND (column_name ~* '(^|_)(lat|lon|lng|latitude|longitude)($|_)' OR column_name ILIKE '%coord%')`)).rows;
     expect(cols).toEqual([]);
     const inbox = (await pool.query(`SELECT place_county, place_area FROM channel_inbox`)).rows;
     expect(inbox.every((r) => r.place_county === null && r.place_area === null)).toBe(true);
@@ -551,5 +551,46 @@ describe("payer admitted by starting the chat", () => {
     expect(sub).toEqual([{ can_pay: true }]);
     // From now on they can chat like anyone else
     expect((await signed(inbound, IN, stranger({ text: "STOP" }))).status).toBe(202);
+  });
+});
+
+describe("shared links through the WhatsApp simulator (R01, R03, R06)", () => {
+  const REEL = "https://www.instagram.com/reel/C9abcDEF123/?igsh=abc";
+  const outbox = async (to = "254700000001") => (await pool.query(`SELECT body FROM channel_outbox WHERE recipient=$1 ORDER BY created_at`, [to])).rows.map((r) => r.body as string);
+  const send = async (o: Record<string, unknown>) => { expect((await signed(inbound, IN, msg(o))).status).toBe(202); await processInboxOnce("whatsapp"); };
+  const taskOf = async (sender = "254700000001") => (await pool.query(`SELECT task_id FROM channel_identities WHERE sender_hash=$1`, [senderHash("whatsapp", sender)])).rows[0].task_id as string;
+
+  it("a link alone opens a task with one honest acknowledgment and no model call", async () => {
+    await send({ text: REEL });
+    const out = await outbox();
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/I've added the Instagram link\. I can't read the video from a link: open your task and add a screenshot/);
+    expect(out[0]).toMatch(/Your task is ready: https:\/\/app\.test\/t\/[0-9a-f-]+#k=/);
+    expect(out[0]).not.toMatch(/instagram\.com/);
+    expect(interpret).not.toHaveBeenCalled();
+    const t = await taskOf();
+    expect((await pool.query(`SELECT title FROM tasks WHERE id=$1`, [t])).rows[0].title).toBe("Shared Instagram post");
+    expect((await pool.query(`SELECT platform, status FROM shared_sources WHERE task_id=$1`, [t])).rows).toEqual([{ platform: "instagram", status: "preview_only" }]);
+  });
+
+  it("the screenshot that follows recovers the same task, not a new one", async () => {
+    await send({ text: REEL });
+    const t = await taskOf();
+    await send({ image: IMG, text: undefined });
+    expect(await taskOf()).toBe(t);
+    expect((await pool.query(`SELECT type FROM evidence_items WHERE task_id=$1 ORDER BY created_at`, [t])).rows.map((r) => r.type)).toEqual(["user_image"]);
+    // Once an item is being bought, a new photo is a new task again
+    await send({ text: "https://www.tiktok.com/@a/video/7301234567890123456 this lamp" });
+    expect(await taskOf()).not.toBe(t);
+  });
+
+  it("a replayed event is one task and one reply; another sender's same link is a separate task", async () => {
+    const m = msg({ text: REEL });
+    await signed(inbound, IN, m); await signed(inbound, IN, m);
+    await processInboxOnce("whatsapp");
+    expect(await outbox()).toHaveLength(1);
+    await send({ text: REEL, sender: "254700000002" });
+    expect(await taskOf("254700000002")).not.toBe(await taskOf());
+    expect((await pool.query(`SELECT count(*)::int n FROM shared_sources WHERE identity='instagram:C9abcDEF123' AND task_id IN ($1,$2)`, [await taskOf(), await taskOf("254700000002")])).rows[0].n).toBe(2);
   });
 });

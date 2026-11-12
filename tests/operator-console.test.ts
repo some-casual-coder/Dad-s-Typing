@@ -66,3 +66,14 @@ describe("operator console", () => {
     expect(v.fulfilment!.done[1].source).toBe("Confirmed by our operator");
   });
 });
+
+describe("R12 public-like configuration", () => {
+  it("operator tools stay locked in production unless explicitly enabled", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      expect(() => login("o".repeat(40))).toThrow();
+      vi.stubEnv("OPERATOR_ENABLED", "1");
+      expect(login("o".repeat(40)).value).toMatch(/^\d+\./);
+    } finally { vi.unstubAllEnvs(); }
+  });
+});

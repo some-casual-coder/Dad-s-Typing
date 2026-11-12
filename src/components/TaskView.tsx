@@ -6,6 +6,7 @@ import Comparison from "./Comparison";
 import DeliveredCards from "./DeliveredCards";
 import PayerPanel from "./PayerPanel";
 import ShareInvite from "./ShareInvite";
+import SharedSources from "./SharedSources";
 import StatusTimeline from "./StatusTimeline";
 import {
   api, ApiError, type ChatMessage, type Comparison as Cmp, type Offer, type Proposal, type TaskView as View,
@@ -154,6 +155,8 @@ export default function TaskPage({ taskId }: { taskId: string }) {
       <Chat taskId={taskId} token={token} messages={messages} serverProposals={serverProposals} canSend={canDo(roles, "message")}
         canConfirm={canDo(roles, "confirm_requirement")} onChanged={load}
         onSent={(m) => setMessages((old) => mergeMsgs(old, m))} />
+
+      <SharedSources taskId={taskId} token={token} canEdit={canDo(roles, "message")} refreshKey={messages.length} onChanged={load} />
 
       <section className="card stack" aria-labelledby="req-h">
         <h2 id="req-h">What we need</h2>
