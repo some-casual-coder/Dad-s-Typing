@@ -6,6 +6,7 @@ import Comparison from "./Comparison";
 import DeliveredCards from "./DeliveredCards";
 import PayerPanel from "./PayerPanel";
 import ShareInvite from "./ShareInvite";
+import StatusTimeline from "./StatusTimeline";
 import {
   api, ApiError, type ChatMessage, type Comparison as Cmp, type Offer, type Proposal, type TaskView as View,
 } from "@/lib/api";
@@ -127,16 +128,13 @@ export default function TaskPage({ taskId }: { taskId: string }) {
           <h2 id="sel-h">Chosen: {sel.title}</h2>
           <p>From {sel.seller}{sel.reason ? ` · Reason: ${sel.reason}` : ""}</p>
           {sel.stale && <p className="error">The requirements changed after this choice. Please choose again.</p>}
-          {sel.route === "external" && (
-            <>
-              <p className="muted">This is an external retailer link. Payment is not taken here.</p>
-              {extOffer?.url && (
-                <a className="btn" href={extOffer.url} target="_blank" rel="noopener noreferrer">View at retailer</a>
-              )}
-            </>
+          {sel.route === "external" && extOffer?.url && (
+            <a className="small" href={extOffer.url} target="_blank" rel="noopener noreferrer">See the listing at the store</a>
           )}
         </section>
       )}
+
+      {view.fulfilment && <StatusTimeline taskId={taskId} token={token} f={view.fulfilment} onChanged={load} />}
 
       {view.receipt && (
         <section className="card receipt" aria-labelledby="rc-h">

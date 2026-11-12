@@ -12,7 +12,17 @@ export interface Requirement {
   id: string; key: string; op: string; value: unknown; unit?: string | null;
   essential: boolean; status: "proposed" | "confirmed";
 }
+export interface ConciergeSummary {
+  provider: string; capMinor: number; estimateMinor: number; rule: string; arrival: string | null;
+  lines: { label: string; status: string; currency: string; minor: number | null; highMinor: number | null }[];
+}
+export interface Fulfilment {
+  arrival: string | null; next: string[]; canCancel: boolean;
+  done: { status: string; text: string; at: string; source: string; note?: string }[];
+  money?: { capMinor: number; estimateMinor: number; actualMinor: number | null; extraDueMinor: number | null; extraDecision: string | null; currency: string; rule: string; concierge: string };
+}
 export interface OrderView {
+  kind?: "merchant" | "concierge"; concierge?: ConciergeSummary | null;
   id: string; seller: string; sku: string; title: string; quantity: number;
   currency: string; itemMinor: number; shippingMinor: number | null; totalMinor: number; status: string;
   refundedMinor?: number; refundPendingMinor?: number;
@@ -25,7 +35,7 @@ export interface TaskView {
   id: string; title: string; purpose?: string | null; version: number; nextAction: NextAction;
   viewer: { roles: Role[] }; requirements: Requirement[];
   selection: { id: string; stale: boolean; title: string; seller: string; route: string; reason: string; chosenAt: string } | null;
-  order: OrderView | null; receipt: Receipt | null;
+  order: OrderView | null; receipt: Receipt | null; fulfilment: Fulfilment | null;
 }
 export interface Check { key: string; essential: boolean; result: "match" | "mismatch" | "unknown"; reason: string }
 export interface Offer {
@@ -101,6 +111,8 @@ export const api = {
   saveDelivery: (id: string, token: string, body: DeliveryInputs) => call<{ ok: true }>("PUT", `${t(id)}/delivery`, { token, body }),
   addQuote: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/quotes`, { token, body }),
   markStep: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/steps`, { token, body }),
+  cancelOrder: (id: string, token: string) => call<{ ok: true }>("POST", `${t(id)}/order/cancel`, { token, body: {} }),
+  decideExtra: (id: string, token: string, decision: "approved" | "declined") => call<{ ok: true }>("POST", `${t(id)}/order/extra`, { token, body: { decision } }),
   setDestination: (id: string, token: string, body: { confirm?: boolean; place?: string; handling?: "pickup" | "door" }) =>
     call<{ county: string; area: string }>("PUT", `${t(id)}/destination`, { token, body }),
   getMessages: (id: string, token: string) =>

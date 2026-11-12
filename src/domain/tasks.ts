@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { authorize, can, canMint, hashToken, newToken, type Role } from "./access";
-import { tx, type Tx } from "./db";
+import { freezeConcierge } from "./concierge";
+import { pool, tx, type Tx } from "./db";
 import { DomainError } from "./errors";
 import { evaluate, type Attribute, type Op, type Requirement } from "./eligibility";
 import { logEvent } from "./events";
@@ -210,7 +211,18 @@ export async function selectOffer(taskId: string, token: string, input: { offerI
   });
 }
 
+// An import is priced fresh before freezing: price, FX and stock can move after choosing
+async function conciergePlan(taskId: string, token: string, offerId: string) {
+  const { getDelivery } = await import("./delivery");
+  const d = await getDelivery(taskId, token);
+  const card = [...d.cards.closest, ...d.cards.similar, ...d.cards.more].find((x) => x.offerId === offerId);
+  const plan = d.plans.find((p) => p.id === card?.planId) ?? d.plans.find((p) => p.offerId === offerId && p.primary);
+  return plan ? { plan, fx: d.fx } : null;
+}
+
 export async function createSellerOrder(taskId: string, token: string, input: { selectionId: string }) {
+  const peek = (await pool.query(`SELECT offer_id, offer_snapshot->>'route' AS route FROM selections WHERE id=$1 AND task_id=$2`, [input.selectionId, taskId])).rows[0];
+  const imp = peek?.route === "external" ? await conciergePlan(taskId, token, peek.offer_id) : null;
   return tx(async (c) => {
     const g = await authorize(c, taskId, token, "review_order");
     const t = (await c.query(`SELECT version, cancelled_at FROM tasks WHERE id=$1 FOR UPDATE`, [taskId])).rows[0];
@@ -221,9 +233,12 @@ export async function createSellerOrder(taskId: string, token: string, input: { 
     if (t.cancelled_at || s.superseded_at || s.task_version !== t.version)
       throw new DomainError("stale", "The choice changed; it needs a fresh review");
     const snap = s.offer_snapshot;
-    if (snap.route !== "paypal") throw new DomainError("not_payable", "This offer is bought at the retailer");
     const live = (await c.query(`SELECT unit_price_minor, shipping_minor, currency, availability FROM offers WHERE id=$1`, [s.offer_id])).rows[0];
     if (!quoteUnchanged(snap, live)) throw new DomainError("stale", "The price or stock changed; review again");
+    if (snap.route !== "paypal") {
+      if (!imp) throw new DomainError("not_payable", "This option is bought at the store");
+      return orderView(await freezeConcierge(c, taskId, s.id, g.id, { plan: imp.plan, fx: imp.fx, snap: { offerId: s.offer_id, title: snap.title } }));
+    }
     const item = snap.unitPriceMinor, ship = snap.shippingMinor;
     if (!Number.isInteger(item) || !Number.isInteger(ship)) throw new DomainError("not_payable", "Delivery or price not confirmed");
     const id = randomUUID();
@@ -239,6 +254,6 @@ export async function createSellerOrder(taskId: string, token: string, input: { 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const orderView = (o: Record<string, any>) => ({
-  id: o.id, taskId: o.task_id, selectionId: o.selection_id, merchantId: o.merchant_id, seller: o.seller, sku: o.sku, title: o.title,
+  kind: (o.kind ?? "merchant") as "merchant" | "concierge", id: o.id, taskId: o.task_id, selectionId: o.selection_id, merchantId: o.merchant_id, seller: o.seller, sku: o.sku, title: o.title,
   quantity: o.quantity, currency: o.currency, itemMinor: o.item_minor, shippingMinor: o.shipping_minor, totalMinor: o.total_minor, status: o.status,
 });

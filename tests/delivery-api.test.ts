@@ -62,9 +62,9 @@ describe("delivery api", () => {
     expect(local.exact).toBe(true);
     expect(local.match.matched).toContain("carrier");
     expect(d.json.cheapestId).toBe(local.id);
-    // FX carries its source and date; offline in tests, so it says so
-    expect(d.json.fx.USD).toMatchObject({ stale: true, rateDate: expect.any(String), source: expect.any(String) });
-    expect(d.json.fxSource).toContain("may be out of date");
+    // FX carries its source and date, whichever rate the test database holds
+    expect(d.json.fx.USD).toMatchObject({ rateDate: expect.any(String), source: expect.any(String), kesPerUnitMicro: expect.any(Number) });
+    expect(d.json.fxSource).toMatch(/1 USD = KSh/);
   });
 
   it("asks the browser one destination question, then never again", async () => {

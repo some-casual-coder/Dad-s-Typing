@@ -1,4 +1,4 @@
-import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { DomainError } from "@/domain/errors";
 import { channelSecret, getChannel } from "./registry";
 
@@ -51,7 +51,7 @@ export async function readSigned(channel: string, req: Request): Promise<Record<
 
 // The request MAC uses the secret itself (the connector signs with it); every
 // other use gets its own HKDF subkey so purposes cannot be confused
-const subkey = (channel: string, purpose: "grant" | "sender") =>
+const subkey = (channel: string, purpose: "grant" | "sender" | "recipient") =>
   Buffer.from(hkdfSync("sha256", channelSecret(channel), "dt-channel-v1", `${channel}:${purpose}`, 32));
 
 export const deriveChannelToken = (channel: string, grantId: string) =>
@@ -59,3 +59,22 @@ export const deriveChannelToken = (channel: string, grantId: string) =>
 
 export const senderHash = (channel: string, sender: string) =>
   createHmac("sha256", subkey(channel, "sender")).update(sender).digest("hex");
+
+// AES-256-GCM so a status push can reach the sender without a readable number at rest
+export function sealRecipient(channel: string, recipient: string): string {
+  const iv = randomBytes(12);
+  const c = createCipheriv("aes-256-gcm", subkey(channel, "recipient"), iv);
+  const body = Buffer.concat([c.update(recipient, "utf8"), c.final()]);
+  return [iv, c.getAuthTag(), body].map((b) => b.toString("base64url")).join(".");
+}
+
+export function openRecipient(channel: string, sealed: string): string | null {
+  try {
+    const [iv, tag, body] = sealed.split(".").map((p) => Buffer.from(p, "base64url"));
+    const d = createDecipheriv("aes-256-gcm", subkey(channel, "recipient"), iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(body), d.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}

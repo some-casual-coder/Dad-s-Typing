@@ -4,6 +4,7 @@ import { postExchange } from "@/chat/exchange";
 import { validateImage } from "@/chat/image";
 import { placeFromPin } from "@/delivery/places";
 import { tx } from "@/domain/db";
+import { subscribe } from "@/domain/concierge";
 import { answerFromText, askLine, getDestination, inferForSender, placeLabel, putDestination, saveProfile } from "@/domain/destination";
 import { DomainError } from "@/domain/errors";
 import { createTask } from "@/domain/tasks";
@@ -198,6 +199,7 @@ async function processRow(channel: string, row: Row) {
   if (answered) return finish(channel, row, answered);
   const image = row.image_b64 ? { mime: row.image_mime as string, base64: row.image_b64 as string } : undefined;
   const { taskId, token, fresh, dest } = await resolveTask(channel, row, !!image);
+  await tx((c) => subscribe(c, taskId, channel, senderHash(channel, row.sender as string), row.sender as string));
   const ex = await postExchange(taskId, token, { channel, key: `${channel}:${row.provider_message_id}`, text: (row.body as string) || undefined, image });
   const reply = ex.messages.find((m) => m.role === "assistant")?.body ?? "";
   const where = dest === "ask" ? askLine(null) : dest === "known"

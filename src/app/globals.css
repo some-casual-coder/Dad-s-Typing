@@ -112,3 +112,6 @@ details { min-width: 0; }
 .dcard .btn { justify-self: stretch; }
 .more summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 700; }
 .parts { margin: 0; padding-left: 18px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.timeline { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.timeline li.done::marker { content: "● "; color: var(--ok); }
+.timeline li.next::marker { content: "○ "; }

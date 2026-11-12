@@ -39,16 +39,30 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
       <h2 id="pay-h">Payer <span className="tag">Sandbox</span></h2>
       <p className="muted small">Sandbox payment: PayPal test mode and a demo shop. No real money moves.</p>
       {!sel && <p>Waiting for a choice. The payer panel opens once an option is chosen.</p>}
-      {sel && sel.route !== "paypal" && <p>This item is bought at the retailer, so there is nothing to pay here.</p>}
-      {sel && sel.route === "paypal" && !order && (
+      {sel && !order && (
         <>
           <p>Chosen: <strong>{sel.title}</strong> from {sel.seller}.</p>
           <button className="btn" disabled={busy} onClick={review}>{busy ? "Preparing..." : "Review order"}</button>
         </>
       )}
+      {order?.concierge && (
+        <>
+          <p>We buy <strong>{order.title}</strong> through {order.concierge.provider === "kentex" ? "Kentex" : "Aquantuo"} and deliver it to you in Kenya.</p>
+          {order.concierge.arrival && <p>Arrives <strong>{order.concierge.arrival}</strong>.</p>}
+          <p className="price">Up to {formatMoney(order.totalMinor, order.currency)}</p>
+          <p className="small">Our estimate is {formatMoney(order.concierge.estimateMinor, order.currency)} to {formatMoney(order.concierge.capMinor, order.currency)}. {order.concierge.rule}</p>
+          <details className="more"><summary>What this covers</summary>
+            <ul className="parts small">{order.concierge.lines.map((l, i) => (
+              <li key={i}>{l.label}{l.status === "included" ? ": included" : l.minor !== null
+                ? `: ${formatMoney(l.minor, l.currency)}${l.highMinor && l.highMinor !== l.minor ? ` to ${formatMoney(l.highMinor, l.currency)}` : ""}` : ""}</li>
+            ))}</ul>
+          </details>
+          <p className="muted small">Sandbox demonstration: an operator places the order with the provider. PayPal charges in US dollars.</p>
+        </>
+      )}
       {order && (
         <>
-          <dl className="facts">
+          {!order.concierge && <dl className="facts">
             <dt>Item</dt><dd>{order.title}</dd>
             <dt>SKU</dt><dd>{order.sku}</dd>
             <dt>Seller</dt><dd>{order.seller}</dd>
@@ -56,7 +70,7 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
             <dt>Item price</dt><dd>{formatMoney(order.itemMinor, order.currency)}</dd>
             <dt>Delivery</dt><dd>{formatMoney(order.shippingMinor, order.currency)}</dd>
             <dt>Total</dt><dd><strong>{formatMoney(order.totalMinor, order.currency)}</strong></dd>
-          </dl>
+          </dl>}
           {order.status === "awaiting_payer" && (
             <button className="btn pay" disabled={busy} onClick={pay}>
               {busy ? "Opening PayPal..." : "Pay with PayPal (sandbox)"}
