@@ -10,12 +10,18 @@ export const RULES = {
     minimumUsdMinor: { texas: 5000, delaware: 10000 } as Record<string, number>,
     // Inches cubed per kg, from the same page
     volumetricInchesDivisor: 306,
+    // Assisted shopping terms, kentexcargo.com/help/usa/assisted-shopping, read 2026-11-12
+    assistedFeePct: 10,
+    insuranceThresholdMinor: 20000,
+    insurancePct: 5,
     customs: "included" as const,
     customsNote: "Provider says clearance, duties and import taxes are in the rate for standard personal shipments; VAT is not mentioned.",
   },
   aquantuo: {
-    source: "aquantuo.com via a second-hand report, not verified 2026-11-12",
+    source: "aquantuo.com price update (US, from 2025-05-30) and Kenya shipping page (UK), via search results 2026-11-12",
     airUsdPerKgMinor: 1800,
+    // UK page figure seen only in a search summary; the page itself was not readable
+    ukAirUsdPerKgMinor: 1400,
     buyForMeFeePct: 7.5,
     // Divisor not published on a page we could read
     customs: "unknown" as const,

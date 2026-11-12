@@ -13,8 +13,9 @@ export function volumetricKg(p: Parcel): number | null {
 const missingDims = (p: Parcel) => !p.lengthMm || !p.widthMm || !p.heightMm;
 
 // Freight in USD from a dated rate; never a firm number without packed data
-export function freight(provider: "aquantuo" | "kentex", p: Parcel): Component {
-  const rate = RULES[provider].airUsdPerKgMinor;
+export function freight(provider: "aquantuo" | "kentex", p: Parcel, lane: "us" | "uk" = "us"): Component {
+  const rate = provider === "aquantuo" && lane === "uk" ? RULES.aquantuo.ukAirUsdPerKgMinor : RULES[provider].airUsdPerKgMinor;
+  const unconfirmed = provider === "aquantuo" && lane === "uk" ? " UK rate is unconfirmed." : "";
   const base = { key: "freight" as const, label: "International freight", currency: "USD", source: SRC[provider] };
   if (!p.weightGrams) {
     return comp({ ...base, status: "unknown", note: "Needs the packed weight and box size." });
@@ -24,19 +25,33 @@ export function freight(provider: "aquantuo" | "kentex", p: Parcel): Component {
   const floorMin = Math.min(...Object.values(mins), 0);
   if (missingDims(p)) {
     return comp({ ...base, status: "unknown", lowMinor: Math.max(Math.round(actualKg * rate), floorMin),
-      note: "From the actual weight only. Box size can raise it." });
+      note: `From the actual weight only. Box size can raise it.${unconfirmed}` });
   }
   const volKg = volumetricKg(p) ?? 0;
   const kg = Math.max(actualKg, volKg);
   const raw = Math.round(kg * rate);
   const note = `${kg.toFixed(2)} kg billed (${volKg > actualKg ? "box size" : "actual weight"}). Warehouse reweigh can change it.`;
-  if (provider === "aquantuo") return comp({ ...base, status: "estimated", minor: raw, note: `${note} Aquantuo's volume divisor is unconfirmed.` });
+  if (provider === "aquantuo") return comp({ ...base, status: "estimated", minor: raw, note: `${note} Aquantuo's volume divisor is unconfirmed.${unconfirmed}` });
   const m = RULES.kentex.minimumUsdMinor;
   const hub = p.hub ? m[p.hub] : undefined;
   if (hub !== undefined) return comp({ ...base, status: "estimated", minor: Math.max(raw, hub), note });
   return comp({ ...base, status: "estimated", minor: Math.max(raw, m.texas), highMinor: Math.max(raw, m.delaware),
     note: `${note} Minimum depends on the warehouse: $50 Texas, $100 Delaware.` });
 }
+
+export const kentexServiceFee = (itemMinor: number): Component =>
+  comp({ key: "buy_fee", label: "Kentex service fee", status: "estimated", currency: "USD", minor: Math.round(itemMinor * RULES.kentex.assistedFeePct / 100),
+    note: `${RULES.kentex.assistedFeePct}% of the item price only. A $5 minimum was reported but is not in the terms.`, source: SRC.kentex });
+
+export const salesTax = (currency: string): Component =>
+  comp({ key: "sales_tax", label: "US sales tax and store delivery", status: "unknown", currency,
+    note: "Shown as a separate line in the provider's quote.", source: SRC.kentex });
+
+export const kentexInsurance = (itemMinor: number): Component | null =>
+  itemMinor > RULES.kentex.insuranceThresholdMinor
+    ? comp({ key: "insurance", label: "Freight insurance", status: "estimated", currency: "USD", minor: Math.round(itemMinor * RULES.kentex.insurancePct / 100),
+        note: `${RULES.kentex.insurancePct}% of item value, charged when items total over $200.`, source: SRC.kentex })
+    : null;
 
 export const buyForMeFee = (itemMinor: number, currency: string): Component =>
   comp({ key: "buy_fee", label: "Buy For Me fee", status: "estimated", currency, minor: Math.round(itemMinor * RULES.aquantuo.buyForMeFeePct / 100),

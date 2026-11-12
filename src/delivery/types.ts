@@ -4,7 +4,7 @@ export type Mode = "self_buy" | "buy_for_me" | "amazon_buy_ship" | "forwarding";
 export type Handling = "pickup" | "door";
 
 export interface Component {
-  key: "item" | "domestic" | "freight" | "customs" | "buy_fee" | "kenya_delivery";
+  key: "item" | "domestic" | "freight" | "customs" | "buy_fee" | "insurance" | "sales_tax" | "kenya_delivery";
   label: string;
   status: CostStatus;
   currency: string;

@@ -49,7 +49,7 @@ export function handoffFor(provider: Provider, mode: Mode, o: OfferInput, dest: 
       "Pay Aquantuo on its site if you accept it. Bring the quote reference back here.");
   } else if (mode === "amazon_buy_ship") {
     steps.push("Open Kentex's Amazon quote tool and paste the exact product link and variant.",
-      "If the quote includes the item, do not add the Amazon price again.",
+      "Read the quote lines: item, US tax, 10% service fee on the item, shipping, and 5% insurance if items are over $200. If it includes the item, do not add the Amazon price again.",
       "Bring the quote reference and its expiry back here, then accept or pay on Kentex's site.");
   } else {
     steps.push("Check the forwarding rate on Kentex's page and enter the details above.", "Sign in to your Kentex account and read your warehouse address there.", WAREHOUSE,

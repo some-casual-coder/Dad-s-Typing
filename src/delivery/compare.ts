@@ -1,4 +1,4 @@
-import { buyForMeFee, customs, freight, isPriced, kenyaDelivery, sumKnown } from "./estimate";
+import { buyForMeFee, customs, freight, isPriced, kentexInsurance, kentexServiceFee, kenyaDelivery, salesTax, sumKnown } from "./estimate";
 import { handoffFor } from "./handoff";
 import { comp, RULES, RULES_AS_OF, toKes } from "./rules";
 import type { Component, Destination, ImportedQuote, Mode, OfferInput, Parcel, Plan, Prefs, Provider, RouteKind } from "./types";
@@ -67,6 +67,8 @@ function quotedParts(o: OfferInput, q: ImportedQuote, provider: Provider): Compo
   return parts;
 }
 
+const compact = (cs: (Component | null)[]) => cs.filter((c): c is Component => c !== null);
+
 function drafts(i: Inputs): Draft[] {
   const out: Draft[] = [];
   for (const o of i.offers) {
@@ -96,23 +98,20 @@ function drafts(i: Inputs): Draft[] {
 
     if (!us && !uk) continue;
     const aq = (mode: "self_buy" | "buy_for_me") => {
-      const fp = freight("aquantuo", i.parcel);
+      const fp = freight("aquantuo", i.parcel, uk ? "uk" : "us");
       const parts = mode === "buy_for_me" ? [itemPart(o), buyForMeFee(o.priceMinor, o.currency), fp, customs("aquantuo"), kenyaDelivery("aquantuo", i.prefs.handling)]
         : [itemPart(o), domestic(o), fp, customs("aquantuo"), kenyaDelivery("aquantuo", i.prefs.handling)];
-      // The UK lane has no rate we could read
-      const adj = uk ? parts.map((p) => p.key === "freight" ? comp({ ...p, status: "unknown", minor: undefined, lowMinor: undefined, currency: "USD",
-        note: "No UK rate has been confirmed. Use the estimator." }) : p) : parts;
-      forward("aquantuo", mode, "available", uk ? "UK to Kenya lane; rate not confirmed." : "US to Kenya lane.", adj);
+      forward("aquantuo", mode, "available", uk ? "UK to Kenya lane; the rate is unconfirmed." : "US to Kenya lane.", parts);
     };
     aq("self_buy"); aq("buy_for_me");
 
     const amazon = amazonUsListing(o.url);
     if (us) {
       if (amazon) forward("kentex", "amazon_buy_ship", "available", "Eligible Amazon.com listing. Use Kentex's Amazon quote with this exact link and variant.",
-        [itemPart(o), freight("kentex", i.parcel), customs("kentex"), kenyaDelivery("kentex", i.prefs.handling)]);
+        compact([itemPart(o), salesTax(o.currency), kentexServiceFee(o.priceMinor), freight("kentex", i.parcel), kentexInsurance(o.priceMinor), customs("kentex"), kenyaDelivery("kentex", i.prefs.handling)]));
       else forward("kentex", "amazon_buy_ship", "ineligible", "Kentex's Amazon tool needs an amazon.com product link. This listing is not one.", [itemPart(o)]);
       forward("kentex", "forwarding", "available", "US warehouse forwarding. Quote first, then buy.",
-        [itemPart(o), domestic(o), freight("kentex", i.parcel), customs("kentex"), kenyaDelivery("kentex", i.prefs.handling)]);
+        compact([itemPart(o), domestic(o), freight("kentex", i.parcel), kentexInsurance(o.priceMinor), customs("kentex"), kenyaDelivery("kentex", i.prefs.handling)]));
     } else {
       forward("kentex", "forwarding", "ineligible", "Kentex ships from US warehouses only; this is a UK listing.", [itemPart(o)]);
     }

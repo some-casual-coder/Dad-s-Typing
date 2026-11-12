@@ -159,4 +159,27 @@ describe("delivery comparison", () => {
     expect(nextAction("forwarding", ["pre_alert"]).step).toBe("warehouse_verified");
     expect(nextAction("buy_for_me", ["quote_accepted"]).step).toBe("received_warehouse");
   });
+
+  it("adds the Kentex assisted fee, tax line and insurance only over $200", () => {
+    const k = find(buildPlans(base({ quotes: [] })), "A", "kentex", "amazon_buy_ship");
+    expect(k.components.find((c) => c.key === "buy_fee")!.minor).toBe(300);
+    expect(k.components.find((c) => c.key === "sales_tax")!.status).toBe("unknown");
+    expect(k.components.find((c) => c.key === "insurance")).toBeUndefined();
+    expect(k.complete).toBe(false);
+    const pricey = find(buildPlans(base({ offers: [{ ...amazon, priceMinor: 25000 }], quotes: [] })), "A", "kentex", "amazon_buy_ship");
+    expect(pricey.components.find((c) => c.key === "insurance")!.minor).toBe(1250);
+    const edge = find(buildPlans(base({ offers: [{ ...amazon, priceMinor: 20000 }], quotes: [] })), "A", "kentex", "forwarding");
+    expect(edge.components.find((c) => c.key === "insurance")).toBeUndefined();
+  });
+
+  it("prices the Aquantuo UK lane at its own flagged rate", () => {
+    const uk2 = find(buildPlans(base({ offers: [uk], quotes: [] })), "U", "aquantuo", "self_buy");
+    const us2 = find(buildPlans(base({ offers: [other], quotes: [] })), "O", "aquantuo", "self_buy");
+    const fu = uk2.components.find((c) => c.key === "freight")!, fs = us2.components.find((c) => c.key === "freight")!;
+    expect(fu.status).toBe("estimated");
+    expect(fu.minor).toBe(2800);
+    expect(fs.minor).toBe(3600);
+    expect(fu.note).toMatch(/UK rate is unconfirmed/);
+    expect(uk2.complete).toBe(false);
+  });
 });
