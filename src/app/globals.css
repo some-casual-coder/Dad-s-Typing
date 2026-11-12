@@ -40,6 +40,7 @@ p { margin: 0; }
   text-decoration: none; cursor: pointer; text-align: center;
 }
 .btn.secondary { background: transparent; color: var(--accent); }
+.linkish { background: none; border: 0; padding: 0 4px; min-height: 44px; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .btn.pay { background: #0b4da2; border-color: #0b4da2; color: #fff; }
 .btn.small-btn { min-height: 44px; }
 .btn:disabled { opacity: .55; cursor: not-allowed; }

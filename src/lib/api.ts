@@ -45,6 +45,7 @@ export interface DeliveryInputs {
 }
 export interface DeliveryView {
   input: DeliveryInputs; plans: Plan[]; cheapestId: string | null; asOf: string; fxSource: string;
+  destination: { county: string; area: string; source: string; confirmed: boolean } | null; askDestination: boolean;
   progress: { planId: string; done: string[]; next: { step: string | null; text: string } }[];
 }
 export interface SendResult { messages: ChatMessage[]; proposals: Proposal[]; clarification: string | null }
@@ -99,6 +100,8 @@ export const api = {
   saveDelivery: (id: string, token: string, body: DeliveryInputs) => call<{ ok: true }>("PUT", `${t(id)}/delivery`, { token, body }),
   addQuote: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/quotes`, { token, body }),
   markStep: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/steps`, { token, body }),
+  setDestination: (id: string, token: string, body: { confirm?: boolean; place?: string; handling?: "pickup" | "door" }) =>
+    call<{ county: string; area: string }>("PUT", `${t(id)}/destination`, { token, body }),
   getMessages: (id: string, token: string) =>
     call<{ messages: ChatMessage[]; proposals: Proposal[] }>("GET", `${t(id)}/messages`, { token }),
   sendMessage: (id: string, token: string, body: {

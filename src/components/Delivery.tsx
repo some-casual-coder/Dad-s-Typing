@@ -1,10 +1,11 @@
 "use client";
-import { formatRange } from "@/delivery/eta";
 import { useCallback, useEffect, useState } from "react";
 import type { Component, Plan } from "@/delivery/types";
 import { STEP_LABELS, stepsFor, type Step } from "@/delivery/steps";
 import { api, ApiError, type DeliveryInputs, type DeliveryView } from "@/lib/api";
+import { formatRange } from "@/delivery/eta";
 import { formatMoney } from "@/lib/format";
+import DestinationAsk from "./DestinationAsk";
 
 const STATUS_TEXT: Record<Component["status"], string> = {
   known: "Known", estimated: "Estimated", included: "Included", unknown: "Unknown", not_applicable: "Not applicable",
@@ -180,12 +181,9 @@ export default function Delivery({ taskId, token, canEdit, refreshKey }: { taskI
     <section className="card stack" aria-labelledby="dlv-h">
       <h2 id="dlv-h">Getting it to Kenya</h2>
       <p className="muted">Compare buying here with buying abroad. Costs marked Unknown are not guessed, and an incomplete total never wins.</p>
+      <DestinationAsk taskId={taskId} token={token} dest={v.destination} canEdit={canEdit} onChanged={() => { setF(null); void load(); }} />
       {canEdit && (
         <div className="stack">
-          <div className="row">
-            <label className="field"><span>County</span><input value={f.county} maxLength={80} onChange={(e) => set("county", e.target.value)} placeholder="Nairobi" /></label>
-            <label className="field"><span>City or area</span><input value={f.city} maxLength={80} onChange={(e) => set("city", e.target.value)} placeholder="Westlands" /></label>
-          </div>
           <div className="row">
             <label><input type="radio" name="handling" checked={f.handling === "door"} onChange={() => set("handling", "door")} /> Deliver to me</label>
             <label><input type="radio" name="handling" checked={f.handling === "pickup"} onChange={() => set("handling", "pickup")} /> I will collect</label>

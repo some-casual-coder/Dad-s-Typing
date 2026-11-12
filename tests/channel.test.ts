@@ -61,7 +61,7 @@ const IN = "/api/channel/whatsapp/inbound";
 
 beforeEach(async () => {
   interpret.mockReset().mockResolvedValue({ observations: [], proposedRequirements: [{ key: "opening", op: "eq", value: "top", essential: true, quote: "x" }], clarification: null, reply: "Got it, a cat carrier." });
-  await pool.query("TRUNCATE channel_outbox, channel_inbox, channel_identities, channel_status");
+  await pool.query("TRUNCATE channel_outbox, channel_inbox, channel_identities, channel_status, sender_profiles");
 });
 
 const count = async (sql: string, args: unknown[] = []) => (await pool.query(sql, args)).rows[0].n as number;
@@ -401,5 +401,51 @@ describe("scrub and caps", () => {
   it("a daily cap stops further calls with a clear 429", () => {
     dailyCap("cap-test", 2); dailyCap("cap-test", 2);
     expect(() => dailyCap("cap-test", 2)).toThrow(/daily limit/);
+  });
+});
+
+describe("destination from the sender", () => {
+  const outbox = async () => (await pool.query(`SELECT body FROM channel_outbox ORDER BY created_at`)).rows.map((r) => r.body as string);
+  const send = async (o: Record<string, unknown>) => {
+    expect((await signed(inbound, IN, msg(o))).status).toBe(202);
+    await processInboxOnce("whatsapp");
+  };
+
+  it("asks once for a +254 sender, and a returning sender is asked nothing", async () => {
+    await send({ image: IMG });
+    expect((await outbox()).at(-1)).toMatch(/Deliver to Nairobi\? Reply YES/);
+    await send({ text: "Westlands" });
+    expect((await outbox()).at(-1)).toMatch(/^Delivering to Westlands, Nairobi/);
+    expect(interpret).toHaveBeenCalledTimes(1);
+    // A new photo starts a new task: the saved place is used, no question
+    await send({ image: IMG });
+    const last = (await outbox()).at(-1)!;
+    expect(last).not.toMatch(/Deliver to .*\?/);
+    expect(last).toMatch(/Delivering to Westlands, Nairobi, as last time/);
+  });
+
+  it("a YES confirms the default", async () => {
+    await send({ image: IMG });
+    await send({ text: "yes" });
+    expect((await outbox()).at(-1)).toMatch(/^Delivering to Nairobi\./);
+  });
+
+  it("maps a location pin to county and area and keeps no coordinates", async () => {
+    await send({ image: IMG });
+    await send({ text: undefined, location: { lat: -1.2921, lon: 36.7856 } });
+    expect((await outbox()).at(-1)).toMatch(/deliver to Kilimani, Nairobi/);
+    const cols = (await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND (column_name ILIKE '%lat%' OR column_name ILIKE '%lon%' OR column_name ILIKE '%coord%')`)).rows;
+    expect(cols).toEqual([]);
+    const inbox = (await pool.query(`SELECT place_county, place_area FROM channel_inbox`)).rows;
+    expect(inbox.every((r) => r.place_county === null && r.place_area === null)).toBe(true);
+    const dump = JSON.stringify((await pool.query(`SELECT * FROM delivery_plans`)).rows) + JSON.stringify((await pool.query(`SELECT * FROM sender_profiles`)).rows)
+      + JSON.stringify((await pool.query(`SELECT payload FROM task_events`)).rows);
+    expect(dump).not.toMatch(/-1\.29|36\.78/);
+  });
+
+  it("refuses a pin outside Kenya or a malformed one", async () => {
+    await send({ text: undefined, location: { lat: 51.5, lon: -0.12 } });
+    expect((await outbox()).at(-1)).toMatch(/outside Kenya/);
+    expect((await signed(inbound, IN, msg({ text: undefined, location: { lat: "x", lon: 1 } }))).status).toBe(422);
   });
 });

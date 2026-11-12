@@ -19,6 +19,7 @@ import { POST as invite } from "@/app/api/tasks/[id]/invites/route";
 import { GET as getDelivery, PUT as putDelivery } from "@/app/api/tasks/[id]/delivery/route";
 import { POST as postQuote } from "@/app/api/tasks/[id]/delivery/quotes/route";
 import { POST as postStep } from "@/app/api/tasks/[id]/delivery/steps/route";
+import { PUT as putDest } from "@/app/api/tasks/[id]/destination/route";
 
 type Call = (req: Request, ctx: never) => Promise<Response>;
 let ip = 0;
@@ -64,6 +65,18 @@ describe("delivery api", () => {
     // FX carries its source and date; offline in tests, so it says so
     expect(d.json.fx.USD).toMatchObject({ stale: true, rateDate: expect.any(String), source: expect.any(String) });
     expect(d.json.fxSource).toContain("may be out of date");
+  });
+
+  it("asks the browser one destination question, then never again", async () => {
+    const s = await setup();
+    const first = (await call(getDelivery, "GET", s.mum, s.id)).json;
+    expect(first.askDestination).toBe(true);
+    expect((await call(putDest, "PUT", s.payer, s.id, { confirm: true })).status).toBe(403);
+    expect((await call(putDest, "PUT", s.mum, s.id, {})).status).toBe(422);
+    expect((await call(putDest, "PUT", s.mum, s.id, { place: "kilimani" })).json).toEqual({ county: "Nairobi", area: "Kilimani" });
+    const after = (await call(getDelivery, "GET", s.mum, s.id)).json;
+    expect(after.askDestination).toBe(false);
+    expect(after.destination).toMatchObject({ county: "Nairobi", area: "Kilimani", confirmed: true });
   });
 
   it("fails closed for the wrong or missing access", async () => {
