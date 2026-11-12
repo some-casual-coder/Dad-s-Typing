@@ -7,26 +7,27 @@
 <meta name="description" content="Shopping starts in the family chat. Send a photo, let Mum choose, pay once with PayPal, keep the receipt with the request.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,600&display=swap">
 <style>
 /* Layout: one long family-chat scroll on the deck's cream paper. Illustrations drift in layers
    (parallax), copy reads like chat bubbles, and payment is shown as a real paper receipt. */
 :root {
-  --paper: #FFF7E8;      /* deck background */
-  --paper-2: #F7EDD8;    /* deeper paper for bands */
+  --paper: #FFFFFF;      /* page base */
+  --cream: #FFF7E8;      /* deck paper: only behind the illustrations and the receipt */
+  --paper-2: var(--cream);
   --ink: #122A24;        /* deck headline ink */
   --green: #154A38;      /* deck brand green */
   --sage: #D8DECF;       /* deck table / soft fills */
   --lilac: #BBB6E8;      /* deck highlight */
   --coral: #E8674A;      /* from the illustrations */
   --muted: #4B5F57;
-  --line: #D6CDB8;
-  --card: #FFFCF4;
+  --line: #E7E2D8;
+  --card: #FFFFFF;
   --slip: #FFFEFA;       /* receipt paper */
   --on-green: #FFF7E8;
   --shadow: 0 1px 0 rgba(18,42,36,.06), 0 18px 40px -24px rgba(18,42,36,.35);
-  --display: "Fraunces", Georgia, "Times New Roman", serif;   /* wordmark, headlines */
-  --body: "DM Sans", "Helvetica Neue", Arial, sans-serif;      /* reading, chat, prices, controls */
+  --display: "Poppins", "Helvetica Neue", Arial, sans-serif;  /* one family, same as the app */
+  --body: "Poppins", "Helvetica Neue", Arial, sans-serif;
   --hand: var(--display);
   --mono: var(--body);
   --radius: 22px;
@@ -45,7 +46,7 @@ img { max-width: 100%; height: auto; display: block; }
 a { color: inherit; }
 :focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; border-radius: 8px; }
 .wrap { max-width: var(--wrap); margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
-h1, h2, h3 { font-family: var(--display); line-height: 1.08; letter-spacing: -.01em; font-variation-settings: "SOFT" 50; margin: 0; text-wrap: balance; color: var(--ink); }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; line-height: 1.12; letter-spacing: -.02em; margin: 0; text-wrap: balance; color: var(--ink); }
 h2 { font-size: clamp(2rem, 4.4vw, 3.3rem); font-weight: 600; }
 h3 { font-size: 1.3rem; font-weight: 600; letter-spacing: 0; }
 p { margin: 0; }
@@ -138,7 +139,8 @@ section { scroll-margin-top: 72px; }
 @media (max-width: 480px) { .stories { grid-template-columns: 1fr; } }
 
 /* How it works */
-.how { background: var(--paper-2); }
+.how { background: var(--paper); border-block: 1px solid var(--line); }
+.hero, .close { background: var(--cream); }
 .how .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 64px); align-items: center; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; counter-reset: s; }
 .steps li {
@@ -334,7 +336,7 @@ footer .wrap { display: grid; gap: 18px; }
         <p class="lede">Every request has one detail that matters. We keep it with the order, right through to the receipt.</p>
       </div>
       <div class="stories">
-        <article class="story rise">
+        <article class="story">
           <img src="img/mum-cat-carrier-card.webp" width="720" height="720" loading="lazy" alt="Mum holds her phone next to her orange cat and a soft carrier.">
           <div class="txt">
             <p class="who">Mum</p>
@@ -343,7 +345,7 @@ footer .wrap { display: grid; gap: 18px; }
             <span class="tag live">Try it now</span>
           </div>
         </article>
-        <article class="story rise">
+        <article class="story">
           <img src="img/charger-label-card.webp" width="720" height="720" loading="lazy" alt="A phone camera is aimed at the label on the underside of a laptop.">
           <div class="txt">
             <p class="who">Dad</p>
@@ -352,7 +354,7 @@ footer .wrap { display: grid; gap: 18px; }
             <span class="tag soon">Coming next</span>
           </div>
         </article>
-        <article class="story rise">
+        <article class="story">
           <img src="img/campus-shopping-card.webp" width="720" height="720" loading="lazy" alt="A student checks a receipt while holding a pack of tissue rolls.">
           <div class="txt">
             <p class="who">My little sister</p>
@@ -361,7 +363,7 @@ footer .wrap { display: grid; gap: 18px; }
             <span class="tag soon">Coming next</span>
           </div>
         </article>
-        <article class="story rise">
+        <article class="story">
           <img src="img/family-group-card.webp" width="720" height="720" loading="lazy" alt="A son checks the family chat surrounded by different shopping requests.">
           <div class="txt">
             <p class="who">The family group</p>
@@ -471,9 +473,9 @@ footer .wrap { display: grid; gap: 18px; }
         </article>
 
         <div class="what">
-          <div class="item rise"><span class="n">1</span><h3>Review the exact item</h3><p>Seller, variant, quantity and every fee, in US dollars with the shilling amount beside it.</p></div>
-          <div class="item rise"><span class="n">2</span><h3>Approve in PayPal</h3><p>Whoever is paying signs in to PayPal and approves once. Nothing is charged before that, and if the price changes, they’re asked again.</p></div>
-          <div class="item rise"><span class="n">3</span><h3>Keep the receipt</h3><p>The receipt stays with the request, with tracking until it’s ready to collect. A refund shows as its own line, so the original payment never changes.</p></div>
+          <div class="item"><span class="n">1</span><h3>Review the exact item</h3><p>Seller, variant, quantity and every fee, in US dollars with the shilling amount beside it.</p></div>
+          <div class="item"><span class="n">2</span><h3>Approve in PayPal</h3><p>Whoever is paying signs in to PayPal and approves once. Nothing is charged before that, and if the price changes, they’re asked again.</p></div>
+          <div class="item"><span class="n">3</span><h3>Keep the receipt</h3><p>The receipt stays with the request, with tracking until it’s ready to collect. A refund shows as its own line, so the original payment never changes.</p></div>
         </div>
       </div>
     </div>

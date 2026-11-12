@@ -26,10 +26,10 @@
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--wash); background-attachment: fixed; color: var(--ink);
-  font: 1.0625rem/1.5 var(--font-sans, "DM Sans"), ui-rounded, "Avenir Next", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 1rem/1.55 var(--font-sans, "Poppins"), ui-rounded, "Avenir Next", system-ui, -apple-system, "Segoe UI", sans-serif;
   overflow-wrap: anywhere;
 }
-h1, h2, h3 { font-family: inherit; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; margin: 0; }
+h1, h2, h3 { font-family: inherit; font-weight: 600; letter-spacing: -.015em; line-height: 1.2; margin: 0; }
 h1 { font-size: 1.75rem; } h2 { font-size: 1.3rem; } h3 { font-size: 1.1rem; }
 p { margin: 0; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -91,12 +91,12 @@ p { margin: 0; }
 .offer { background: var(--card); border: 1px solid var(--glass-line); border-radius: 20px; padding: 14px; display: grid; gap: 6px; box-shadow: var(--shadow); }
 .offer.eligible { border-color: var(--ok); }
 .offer-head { display: flex; justify-content: space-between; gap: 8px; align-items: start; flex-wrap: wrap; }
-.badge { font-size: .85rem; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
+.badge { font-size: .85rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
 .badge.eligible { background: var(--ok-bg); color: var(--ok); }
 .badge.ineligible { background: var(--bad-bg); color: var(--bad); }
 .badge.unresolved { background: var(--warn-bg); color: var(--warn); }
 .badge.unchecked { background: var(--warn-bg); color: var(--warn); }
-.price { font-size: 1.3rem; font-weight: 800; letter-spacing: -.01em; }
+.price { font-size: 1.3rem; font-weight: 700; letter-spacing: -.01em; }
 .reasons { margin: 0; padding-left: 1.2rem; font-size: .95rem; color: var(--muted); }
 .excluded summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
 .excluded .offers { margin-top: 8px; }
