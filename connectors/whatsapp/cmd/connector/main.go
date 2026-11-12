@@ -183,7 +183,7 @@ func run(log *slog.Logger) error {
 		Store: st, TS: ts, TR: tr, Log: log, Now: time.Now,
 		Sleep: outbox.RealSleep, ClaimLimit: 2, LeaseSeconds: 300,
 		PollEvery: 3 * time.Second, MinDelay: 3 * time.Second,
-		Jitter: time.Second, RecipientCap: 20, RecipientSpan: time.Hour,
+		Jitter: time.Second, RecipientCap: 60, RecipientSpan: time.Hour,
 		AckBackoff: 5 * time.Second, AckMaxBackoff: time.Hour,
 		SendTimeout: 60 * time.Second, RecordTimeout: 10 * time.Second,
 	}
