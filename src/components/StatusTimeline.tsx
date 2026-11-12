@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { api, ApiError, type Fulfilment } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
+import WhatsAppUpdates from "./WhatsAppUpdates";
 
 // Plain status lines with their source; money detail only reaches the payer
 export default function StatusTimeline({ taskId, token, f, onChanged }: { taskId: string; token: string; f: Fulfilment; onChanged: () => void }) {
@@ -38,6 +39,7 @@ export default function StatusTimeline({ taskId, token, f, onChanged }: { taskId
           Cancel for a full refund
         </button>
       )}
+      <WhatsAppUpdates taskId={taskId} token={token} />
       <p role="alert" className="error">{err}</p>
     </section>
   );

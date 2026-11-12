@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { api, type OrderView, type TaskView } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
+import WhatsAppUpdates from "./WhatsAppUpdates";
 
 interface Props { taskId: string; token: string; view: TaskView; onChanged: () => void }
 
@@ -58,6 +59,7 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
             ))}</ul>
           </details>
           <p className="muted small">Sandbox demonstration: an operator places the order with the provider. PayPal charges in US dollars.</p>
+          <WhatsAppUpdates taskId={taskId} token={token} />
         </>
       )}
       {order && (

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Payments } from "@/adapters/types";
-import { openRecipient, sealRecipient } from "@/channel/bridge";
+import { sealRecipient } from "@/channel/bridge";
+import { queueUpdates } from "@/channel/updates";
 import { formatRange, type Eta } from "@/delivery/eta";
 import { freight } from "@/delivery/estimate";
 import { FX_BUFFER_PCT, type FxTable } from "@/delivery/fx";
@@ -83,8 +84,8 @@ async function addEvent(c: Tx, orderId: string, taskId: string, status: Status, 
     [randomUUID(), orderId, taskId, status, source, note?.slice(0, 200) ?? null, eta ? JSON.stringify(eta) : null, key.slice(0, 120)],
   );
   if (!r.rowCount) return false;
-  const dates = eta ? ` Arrives ${formatRange(eta.earliest, eta.latest)}.` : "";
-  await notify(c, taskId, `${STATUS_TEXT[status]}.${dates}`, `ful:${r.rows[0].id}`);
+  const latest = eta ?? (await c.query(`SELECT eta FROM concierge_orders WHERE seller_order_id=$1`, [orderId])).rows[0]?.eta ?? null;
+  await queueUpdates(c, { eventId: r.rows[0].id, orderId, taskId, status, eta: latest });
   return true;
 }
 
@@ -94,20 +95,12 @@ export async function onConciergePaid(c: Tx, order: { id: string; task_id: strin
 }
 
 // Remember how to reach a chat sender for status pushes, sealed at rest
-export async function subscribe(c: Tx, taskId: string, channel: string, senderHash: string, recipient: string) {
-  await c.query(`INSERT INTO channel_subscriptions (task_id,channel,sender_hash,recipient_enc) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-    [taskId, channel, senderHash, sealRecipient(channel, recipient)]);
+export async function subscribe(c: Tx, taskId: string, channel: string, senderHash: string, recipient: string, canPay: boolean) {
+  await c.query(`INSERT INTO channel_subscriptions (task_id,channel,sender_hash,recipient_enc,can_pay) VALUES ($1,$2,$3,$4,$5)
+    ON CONFLICT (task_id,channel,sender_hash) DO UPDATE SET can_pay = channel_subscriptions.can_pay OR EXCLUDED.can_pay`,
+    [taskId, channel, senderHash, sealRecipient(channel, recipient), canPay]);
 }
 
-async function notify(c: Tx, taskId: string, text: string, key: string) {
-  const subs = (await c.query(`SELECT channel, recipient_enc FROM channel_subscriptions WHERE task_id=$1`, [taskId])).rows;
-  for (const s of subs) {
-    const to = openRecipient(s.channel, s.recipient_enc);
-    if (!to) continue;
-    await c.query(`INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (dedupe_key) DO NOTHING`,
-      [randomUUID(), s.channel, to, text, `${key}:${s.channel}`]);
-  }
-}
 
 const loadOrder = async (c: Tx, orderId: string) => (await c.query(
   `SELECT o.id, o.task_id, o.status, o.total_minor, o.currency, co.*, a.capture_id FROM seller_orders o

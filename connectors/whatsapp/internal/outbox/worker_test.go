@@ -363,3 +363,26 @@ func TestLeaseBudgetStopsBatch(t *testing.T) {
 		t.Fatal("ledger row for unsent item")
 	}
 }
+
+func TestPinAndContactCardSent(t *testing.T) {
+	r := newRig(t)
+	r.ts.Lock()
+	r.ts.Queue = append(r.ts.Queue,
+		tsapp.Item{ID: id1, Recipient: "254700000001", Body: "Pickup point", Attempt: 1, Kind: "location",
+			Location: &tsapp.OutPin{Lat: -1.268, Lon: 36.809, Name: "Kentex Cargo", Address: "65 Muthithi Road"}},
+		tsapp.Item{ID: id2, Recipient: "254700000001", Body: "Contact", Attempt: 1, Kind: "contact",
+			Contact: &tsapp.OutCard{Name: "Kentex Nairobi", Phone: "+254700000000"}},
+		tsapp.Item{ID: id3, Recipient: "254700000001", Body: "bad", Attempt: 1, Kind: "location"})
+	r.ts.Unlock()
+	r.worker().Poll(context.Background())
+	sent := r.tr.Sent()
+	if len(sent) != 2 || sent[0].Text != "[location] Kentex Cargo" || sent[1].Text != "[contact] Kentex Nairobi" {
+		t.Fatalf("sent %v", sent)
+	}
+	if a := r.acks(id3); len(a) != 1 || a[0].State != "failed" {
+		t.Fatalf("a pin without coordinates must fail, got %v", a)
+	}
+	if v := vcard(&tsapp.OutCard{Name: "A;B\nC", Phone: "+1"}); v != "BEGIN:VCARD\nVERSION:3.0\nFN:A B C\nTEL;type=WORK:+1\nEND:VCARD" {
+		t.Fatalf("vcard %q", v)
+	}
+}

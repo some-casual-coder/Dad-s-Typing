@@ -13,6 +13,7 @@ import { claimExternalSearch } from "@/domain/offers";
 import { createInvite, createSellerOrder, createTask, getComparison, selectOffer } from "@/domain/tasks";
 import { getTaskView } from "@/domain/view";
 import { deriveChannelToken, senderHash } from "./bridge";
+import { handleJoinOrStop } from "./join";
 import { menuCards, renderChosen, renderOptions } from "./render";
 import { allowedSenders, channelIds, getChannel, isConfigured, type ChannelDef } from "./registry";
 
@@ -270,6 +271,10 @@ async function optionsBlock(channel: string, hash: string, taskId: string, token
 }
 
 async function processRow(channel: string, row: Row) {
+  if (row.body && !row.image_b64) {
+    const joined = await tx((c) => handleJoinOrStop(c, channel, senderHash(channel, row.sender as string), row.sender as string, row.body as string));
+    if (joined) return finish(channel, row, joined);
+  }
   const contact = await handleContact(channel, row);
   if (contact) return finish(channel, row, contact);
   const answered = await handleDestination(channel, row);
@@ -278,7 +283,7 @@ async function processRow(channel: string, row: Row) {
   if (chosen) return finish(channel, row, chosen);
   const image = row.image_b64 ? { mime: row.image_mime as string, base64: row.image_b64 as string } : undefined;
   const { taskId, token, fresh, dest } = await resolveTask(channel, row, !!image);
-  await tx((c) => subscribe(c, taskId, channel, senderHash(channel, row.sender as string), row.sender as string));
+  await tx((c) => subscribe(c, taskId, channel, senderHash(channel, row.sender as string), row.sender as string, true));
   const ex = await postExchange(taskId, token, { channel, key: `${channel}:${row.provider_message_id}`, text: (row.body as string) || undefined, image });
   // No item named by the AI: search the words they sent, once
   if (fresh && row.body && (await claimExternalSearch(taskId, row.body as string)))

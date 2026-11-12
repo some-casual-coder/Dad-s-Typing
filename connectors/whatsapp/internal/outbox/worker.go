@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -217,6 +218,25 @@ func (w *Worker) paceWait() time.Duration {
 	return wait
 }
 
+func (w *Worker) send(ctx context.Context, it tsapp.Item, id string) error {
+	switch {
+	case it.Kind == "location" && it.Location != nil:
+		p := it.Location
+		return w.TR.SendRich(ctx, it.Recipient, transport.Rich{Kind: "location", Lat: p.Lat, Lon: p.Lon, Name: p.Name, Address: p.Address}, id)
+	case it.Kind == "contact" && it.Contact != nil:
+		return w.TR.SendRich(ctx, it.Recipient, transport.Rich{Kind: "contact", Name: it.Contact.Name, VCard: vcard(it.Contact)}, id)
+	case it.Kind == "" || it.Kind == "text":
+		return w.TR.Send(ctx, it.Recipient, it.Body, id)
+	}
+	return transport.ErrRejected
+}
+
+// vcard builds a minimal card; names and numbers come from the app's hub list.
+func vcard(c *tsapp.OutCard) string {
+	clean := strings.NewReplacer("\n", " ", "\r", " ", ";", " ").Replace
+	return "BEGIN:VCARD\nVERSION:3.0\nFN:" + clean(c.Name) + "\nTEL;type=WORK:" + clean(c.Phone) + "\nEND:VCARD"
+}
+
 func (w *Worker) dispatch(ctx context.Context, it tsapp.Item) {
 	msgID := w.TR.NewMessageID()
 	created, err := w.Store.BeginDispatch(ctx, it.ID, it.Recipient, msgID, w.Now())
@@ -227,7 +247,7 @@ func (w *Worker) dispatch(ctx context.Context, it tsapp.Item) {
 	// Detached from shutdown: a send in flight must finish and be recorded.
 	base := context.WithoutCancel(ctx)
 	sctx, cancel := context.WithTimeout(base, w.SendTimeout)
-	err = w.TR.Send(sctx, it.Recipient, it.Body, msgID)
+	err = w.send(sctx, it, msgID)
 	cancel()
 	w.lastSend = w.Now()
 

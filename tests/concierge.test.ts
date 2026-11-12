@@ -31,7 +31,7 @@ async function paidImport(opts: { subscribe?: boolean } = {}) {
   await recordOffers(me.taskId, [{ source: "channel3", sourceOfferId: `C-${key()}`, route: "external", seller: "amazon.com", title: "Sherpa cat carrier",
     unitPriceMinor: 3000, currency: "USD", availability: "InStock", url: "https://www.amazon.com/dp/B012345678", specs }]);
   await setDestination(me.taskId, me.token, { place: "Westlands" });
-  if (opts.subscribe) await tx((c) => subscribe(c, me.taskId, "sms", "hash-1", "254700000009"));
+  if (opts.subscribe) await tx((c) => subscribe(c, me.taskId, "sms", "hash-1", "254700000009", false));
   const cmp = await getComparison(me.taskId, me.token);
   const sel = await selectOffer(me.taskId, me.token, { offerId: cmp.offers[0].id, expectedVersion: cmp.version }, { idempotencyKey: key() });
   const order = await createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId });
@@ -134,10 +134,23 @@ describe("one payment for an import (option B, sandbox)", () => {
     gate.payments = mk();
     const s = await paidImport({ subscribe: true });
     await recordFulfilment(gate.payments as Payments, ev(s.order.id, "ordered"));
-    const out = (await pool.query(`SELECT recipient, body FROM channel_outbox WHERE dedupe_key LIKE 'ful:%' AND recipient='254700000009' ORDER BY created_at`)).rows;
-    expect(out.slice(-2).map((r) => r.body)).toEqual([expect.stringMatching(/^Paid\. Arrives about/), "Ordered from the store."]);
+    const out = (await pool.query(`SELECT recipient, body FROM channel_outbox WHERE dedupe_key LIKE 'upd:%' AND recipient='254700000009' ORDER BY created_at`)).rows;
+    expect(out.slice(-2).map((r) => r.body)).toEqual([expect.stringMatching(/^Payment received for the Sherpa cat carrier\. .*it should reach you about/),
+      "I've ordered the Sherpa cat carrier from the store. Next stop: Kentex's US warehouse."]);
     const sealed = (await pool.query(`SELECT recipient_enc FROM channel_subscriptions WHERE task_id=$1`, [s.taskId])).rows[0].recipient_enc;
     expect(sealed).not.toContain("254700000009");
+  });
+
+  it("ready to collect queues the pickup message and two reminders; delivery cancels them", async () => {
+    gate.payments = mk();
+    const s = await paidImport({ subscribe: true });
+    for (const st of ["ordered", "at_warehouse", "departed", "cleared", "ready_to_collect"]) await recordFulfilment(gate.payments as Payments, ev(s.order.id, st));
+    const ready = (await pool.query(`SELECT body FROM channel_outbox WHERE recipient='254700000009' AND dedupe_key LIKE 'upd:%' ORDER BY created_at DESC LIMIT 1`)).rows[0].body;
+    expect(ready).toMatch(/ready to collect at Kentex Cargo, Westlands office, 65 Muthithi Road.*maps\.google\.com/);
+    const rem = async () => (await pool.query(`SELECT count(*)::int n FROM channel_outbox WHERE dedupe_key LIKE $1`, [`rem:${s.order.id}:%`])).rows[0].n;
+    expect(await rem()).toBe(2);
+    await recordFulfilment(gate.payments as Payments, ev(s.order.id, "delivered"));
+    expect(await rem()).toBe(0);
   });
 
   it("only the payer can cancel or approve an extra", async () => {

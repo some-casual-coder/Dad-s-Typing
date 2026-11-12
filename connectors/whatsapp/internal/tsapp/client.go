@@ -144,6 +144,22 @@ type Item struct {
 	Recipient string `json:"recipient"`
 	Body      string `json:"body"`
 	Attempt   int    `json:"attempt"`
+	// Kind is "text" (default), "location" or "contact"; Body is then a label.
+	Kind     string   `json:"kind,omitempty"`
+	Location *OutPin  `json:"location,omitempty"`
+	Contact  *OutCard `json:"contact,omitempty"`
+}
+
+type OutPin struct {
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	Name    string  `json:"name"`
+	Address string  `json:"address"`
+}
+
+type OutCard struct {
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
 }
 
 func (c *Client) Claim(ctx context.Context, limit, lease int) ([]Item, error) {

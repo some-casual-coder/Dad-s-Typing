@@ -113,6 +113,7 @@ export const api = {
   addQuote: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/quotes`, { token, body }),
   markStep: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/steps`, { token, body }),
   extractQuote: (id: string, token: string, body: { imageBase64: string; mime: string }) => call<Extracted>("POST", `${t(id)}/delivery/extract`, { token, body }),
+  joinCode: (id: string, token: string) => call<{ code: string; whatsappLink: string | null }>("POST", `${t(id)}/updates`, { token, body: {} }),
   cancelOrder: (id: string, token: string) => call<{ ok: true }>("POST", `${t(id)}/order/cancel`, { token, body: {} }),
   decideExtra: (id: string, token: string, decision: "approved" | "declined") => call<{ ok: true }>("POST", `${t(id)}/order/extra`, { token, body: { decision } }),
   setDestination: (id: string, token: string, body: { confirm?: boolean; place?: string; handling?: "pickup" | "door" }) =>

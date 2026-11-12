@@ -491,10 +491,10 @@ describe("the whole journey in chat", () => {
       const att = await beginAttempt(id.task_id, token, view.order!.id);
       await recordProviderOrder(att.id, "PP-CHAT-1");
       await settleCapture(att.id, { paypalOrderId: "PP-CHAT-1", captureId: "CAPCHAT00001", status: "COMPLETED", amountMinor: view.order!.totalMinor, currency: "USD", payeeMerchantId: "MERCH1" });
-      expect((await outbox()).at(-1)).toMatch(/^Paid\. Arrives about \d+/);
+      expect((await outbox()).at(-1)).toMatch(/^Payment received for the Sherpa cat carrier\./);
       const { recordFulfilment } = await import("@/domain/concierge");
       await recordFulfilment({} as never, { orderId: view.order!.id, status: "ordered", source: "operator", key: "chat-ordered-1" });
-      expect((await outbox()).at(-1)).toBe("Ordered from the store.");
+      expect((await outbox()).at(-1)).toBe("I've ordered the Sherpa cat carrier from the store. Next stop: Kentex's US warehouse.");
     } finally { hooks.external = null; }
   });
 
@@ -509,5 +509,29 @@ describe("the whole journey in chat", () => {
     expect((await getTaskView(id.task_id, tok)).viewer.roles).toEqual(["payer"]);
     const kept = (await pool.query(`SELECT count(*)::int n FROM channel_inbox WHERE contact_name IS NOT NULL`)).rows[0].n;
     expect(kept).toBe(0);
+  });
+});
+
+describe("WhatsApp updates opt-in", () => {
+  const send = async (o: Record<string, unknown>) => {
+    expect((await signed(inbound, IN, msg(o))).status).toBe(202);
+    await processInboxOnce("whatsapp");
+    return (await pool.query(`SELECT body FROM channel_outbox ORDER BY created_at DESC LIMIT 1`)).rows[0].body as string;
+  };
+
+  it("JOIN with a one-time code subscribes the payer; STOP ends it and drops pending reminders", async () => {
+    const { createTask } = await import("@/domain/tasks");
+    const { createJoinCode } = await import("@/channel/join");
+    const t = await createTask({ title: "Cat carrier for Mum", starterRoles: ["helper", "payer"], starterLabel: "Payer" });
+    const { code } = await createJoinCode(t.taskId, t.token);
+    expect(await send({ text: `join ${code.toLowerCase()}` })).toMatch(/^You're in\. I'll message you here as "Cat carrier for Mum" moves/);
+    expect(interpret).not.toHaveBeenCalled();
+    const sub = (await pool.query(`SELECT can_pay FROM channel_subscriptions WHERE task_id=$1`, [t.taskId])).rows;
+    expect(sub).toEqual([{ can_pay: true }]);
+    expect(await send({ text: `JOIN ${code}` })).toMatch(/didn't work/);
+    await pool.query(`INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES (gen_random_uuid(),'whatsapp','254700000001','x','rem:test:1')`);
+    expect(await send({ text: "STOP" })).toMatch(/^Okay, no more order updates here/);
+    expect((await pool.query(`SELECT count(*)::int n FROM channel_subscriptions WHERE task_id=$1`, [t.taskId])).rows[0].n).toBe(0);
+    expect((await pool.query(`SELECT count(*)::int n FROM channel_outbox WHERE dedupe_key='rem:test:1'`)).rows[0].n).toBe(0);
   });
 });

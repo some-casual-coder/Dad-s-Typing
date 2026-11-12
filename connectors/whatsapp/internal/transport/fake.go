@@ -72,6 +72,10 @@ func (f *Fake) Send(_ context.Context, phone, text, id string) error {
 	return nil
 }
 
+func (f *Fake) SendRich(ctx context.Context, phone string, r Rich, id string) error {
+	return f.Send(ctx, phone, fmt.Sprintf("[%s] %s", r.Kind, r.Name), id)
+}
+
 func (f *Fake) Sent() []Sent {
 	f.mu.Lock()
 	defer f.mu.Unlock()

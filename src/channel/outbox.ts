@@ -8,15 +8,19 @@ export async function claimOutbox(channel: string, limit = 5, leaseSeconds = 120
   const lease = Math.min(Math.max(Math.trunc(leaseSeconds) || 120, 30), 300);
   return tx(async (c) => {
     // out of attempts with no ack: it may have been sent, so never resend
-    await c.query(`UPDATE channel_outbox SET state='unknown', body='', recipient='', updated_at=now() WHERE channel=$1 AND state='leased' AND lease_until < now() AND attempts >= $2`, [channel, MAX_ATTEMPTS]);
+    await c.query(`UPDATE channel_outbox SET state='unknown', body='', recipient='', payload=NULL, updated_at=now() WHERE channel=$1 AND state='leased' AND lease_until < now() AND attempts >= $2`, [channel, MAX_ATTEMPTS]);
     const r = await c.query(
       `UPDATE channel_outbox SET state='leased', attempts=attempts+1, lease_until=now() + ($3 || ' seconds')::interval, updated_at=now()
         WHERE id IN (SELECT id FROM channel_outbox WHERE channel=$1 AND (state='pending' OR (state='leased' AND lease_until < now()))
-                     ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED)
-        RETURNING id, recipient, body, attempts`,
+                     AND (not_before IS NULL OR not_before <= now())
+                     ORDER BY COALESCE(not_before, created_at), created_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+        RETURNING id, recipient, body, attempts, kind, payload`,
       [channel, n, String(lease)],
     );
-    return r.rows.map((x) => ({ id: x.id as string, recipient: x.recipient as string, body: x.body as string, attempt: x.attempts as number }));
+    return r.rows.map((x) => ({
+      id: x.id as string, recipient: x.recipient as string, body: x.body as string, attempt: x.attempts as number,
+      ...(x.kind === "location" ? { kind: "location", location: x.payload } : x.kind === "contact" ? { kind: "contact", contact: x.payload } : {}),
+    }));
   });
 }
 
@@ -31,7 +35,7 @@ export async function ackOutbox(channel: string, id: string, ack: { state: strin
     const cur = (await c.query(`SELECT state FROM channel_outbox WHERE id=$1 AND channel=$2 FOR UPDATE`, [id, channel])).rows[0];
     if (!cur) throw new DomainError("not_found", "Unknown outbox item");
     if (FINAL.has(cur.state)) return { state: cur.state as string };
-    await c.query(`UPDATE channel_outbox SET state=$2, provider_message_id=$3, error=$4, body='', recipient='', lease_until=NULL, updated_at=now() WHERE id=$1`,
+    await c.query(`UPDATE channel_outbox SET state=$2, provider_message_id=$3, error=$4, body='', recipient='', payload=NULL, lease_until=NULL, updated_at=now() WHERE id=$1`,
       [id, ack.state, ack.providerMessageId ?? null, ack.error ?? null]);
     return { state: ack.state };
   });

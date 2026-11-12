@@ -7,6 +7,8 @@ export interface ChannelDef {
   sender: RegExp;
   maxReplyChars: number;
   images: boolean;
+  // Can send a location pin and a contact card; others get text and a maps link
+  rich?: boolean;
 }
 
 const PHONE = /^\d{6,15}$/;
@@ -14,7 +16,7 @@ const PHONE = /^\d{6,15}$/;
 // Adding a channel is one entry here plus its secret and allowlist in the env
 const CHANNELS: Record<string, Omit<ChannelDef, "id">> = {
   // a phone number, or an opaque business-scoped id when the user has no visible number
-  whatsapp: { label: "WhatsApp", sender: /^[A-Za-z0-9._:-]{6,64}$/, maxReplyChars: 3000, images: true },
+  whatsapp: { label: "WhatsApp", sender: /^[A-Za-z0-9._:-]{6,64}$/, maxReplyChars: 3000, images: true, rich: true },
   sms: { label: "SMS", sender: PHONE, maxReplyChars: 480, images: false },
   telegram: { label: "Telegram", sender: /^\d{1,20}$/, maxReplyChars: 3500, images: true },
   messenger: { label: "Messenger", sender: /^\d{5,30}$/, maxReplyChars: 1800, images: true },

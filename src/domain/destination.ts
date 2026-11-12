@@ -50,7 +50,7 @@ export const placeLabel = (d: { county: string; area: string }) =>
   !d.area || d.area === d.county ? d.county : d.area.includes(d.county) ? d.area : `${d.area}, ${d.county}`;
 
 // Pickup in Nairobi is the default; a place only matters for door delivery
-export const askLine = (_d?: Destination | null) =>
+export const askLine = () =>
   "You collect it in Nairobi at no extra cost. Reply YES, or name your town or share a location pin to have it delivered.";
 
 const YES = /^\s*(yes|yeah|yep|y|ok|okay|sure|ndio|ndiyo|sawa|collect|pickup|pick up)\b[\s.!]*$/i;

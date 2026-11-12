@@ -271,6 +271,36 @@ func (w *WA) Send(ctx context.Context, phone, text, id string) error {
 	return err
 }
 
+func (w *WA) SendRich(ctx context.Context, phone string, r Rich, id string) error {
+	if !w.State().Ready() {
+		return ErrNotReady
+	}
+	if !phoneRe.MatchString(phone) || r.Name == "" {
+		return ErrRejected
+	}
+	var msg *waE2E.Message
+	switch r.Kind {
+	case "location":
+		msg = &waE2E.Message{LocationMessage: &waE2E.LocationMessage{
+			DegreesLatitude: proto.Float64(r.Lat), DegreesLongitude: proto.Float64(r.Lon),
+			Name: proto.String(r.Name), Address: proto.String(r.Address)}}
+	case "contact":
+		if r.VCard == "" {
+			return ErrRejected
+		}
+		msg = &waE2E.Message{ContactMessage: &waE2E.ContactMessage{
+			DisplayName: proto.String(r.Name), Vcard: proto.String(r.VCard)}}
+	default:
+		return ErrRejected
+	}
+	_, err := w.cur().SendMessage(ctx, types.NewJID(phone, types.DefaultUserServer), msg,
+		whatsmeow.SendRequestExtra{ID: types.MessageID(id)})
+	if errors.Is(err, whatsmeow.ErrNotLoggedIn) {
+		return ErrNotReady
+	}
+	return err
+}
+
 // freshClient swaps in an unpaired client after a logout or revoke.
 func (w *WA) freshClient(ctx context.Context) {
 	w.mu.Lock()

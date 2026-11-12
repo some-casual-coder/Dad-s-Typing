@@ -77,12 +77,22 @@ type Event struct {
 	State   State
 }
 
+// Rich is a pin (Lat/Lon, Name, Address) or a contact card (Name, VCard).
+type Rich struct {
+	Kind          string
+	Lat, Lon      float64
+	Name, Address string
+	VCard         string
+}
+
 type Transport interface {
 	Start(ctx context.Context) error
 	Events() <-chan Event
 	State() State
 	NewMessageID() string
 	Send(ctx context.Context, phone, text, clientMsgID string) error
+	// SendRich sends a location pin or a contact card.
+	SendRich(ctx context.Context, phone string, r Rich, clientMsgID string) error
 	PairPhone(ctx context.Context, phone string) (string, error)
 	StartQR(ctx context.Context) error
 	QR() string
