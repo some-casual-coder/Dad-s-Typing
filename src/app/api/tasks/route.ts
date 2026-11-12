@@ -22,6 +22,6 @@ export const POST = handle(async (req) => {
   // Seeding is best effort; the task is usable without offers
   await seedDemoOffers(taskId).catch(() => console.error("api_error", "seed_demo"));
   // a photo start has no useful title: the AI names the item and seeds these later
-  if (b.seedExternal !== false && (await claimExternalSearch(taskId))) await seedExternalOffers(taskId, title).catch(() => console.error("api_error", "seed_external"));
+  if (b.seedExternal !== false && (await claimExternalSearch(taskId, title))) await seedExternalOffers(taskId, title).catch(() => console.error("api_error", "seed_external"));
   return json({ taskId, token }, 201);
 });

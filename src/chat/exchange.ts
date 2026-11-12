@@ -54,6 +54,6 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
   const item = result?.item;
   // the next poll picks the offers up; the reply never waits on the catalogue
-  if (item) void claimExternalSearch(taskId).then((first) => (first ? seedExternalOffers(taskId, item) : undefined)).catch(() => console.error("channel_error", "seed_external"));
+  if (item) void claimExternalSearch(taskId, item).then((first) => (first ? seedExternalOffers(taskId, item) : undefined)).catch(() => console.error("channel_error", "seed_external"));
   return getExchange(taskId, token, input.key, input.channel);
 }

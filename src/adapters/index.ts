@@ -1,11 +1,12 @@
 import { channel3FromEnv } from "./channel3";
+import { fxFromEnv } from "./fx";
 import { geminiFromEnv } from "./gemini";
 import { openRouterFromEnv } from "./openrouter";
 import { paypalFromEnv } from "./paypal";
 import { transcriberFromEnv } from "./stt";
-import type { Discovery, Interpreter, Payments, Transcriber } from "./types";
+import type { Discovery, FxSource, Interpreter, Payments, Transcriber } from "./types";
 
-const g = globalThis as unknown as { __dtAdapters?: { i?: Interpreter; d?: Discovery; p?: Payments; t?: Transcriber } };
+const g = globalThis as unknown as { __dtAdapters?: { i?: Interpreter; d?: Discovery; p?: Payments; t?: Transcriber; f?: FxSource } };
 const cache = () => (g.__dtAdapters ??= {});
 
 export const getInterpreter = () =>
@@ -13,3 +14,4 @@ export const getInterpreter = () =>
 export const getDiscovery = () => (cache().d ??= channel3FromEnv());
 export const getPayments = () => (cache().p ??= paypalFromEnv());
 export const getTranscriber = () => (cache().t ??= transcriberFromEnv());
+export const getFx = () => (cache().f ??= fxFromEnv());

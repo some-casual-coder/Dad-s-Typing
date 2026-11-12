@@ -6,6 +6,7 @@ import { evaluate, type Attribute, type Op, type Requirement } from "./eligibili
 import { logEvent } from "./events";
 import { idempotent } from "./idempotency";
 import { orderTotal, quoteUnchanged } from "./money";
+import type { OfferSpecs } from "@/adapters/types";
 
 const bump = (c: Tx, taskId: string) =>
   c.query(`UPDATE tasks SET version = version + 1 WHERE id = $1 RETURNING version`, [taskId]).then((r) => r.rows[0].version as number);
@@ -122,19 +123,19 @@ export async function confirmRequirement(taskId: string, token: string, requirem
 export async function recordOffers(taskId: string, offers: Array<{
   source: string; sourceOfferId: string; route: "paypal" | "external"; seller: string; merchantId?: string; sku?: string;
   title: string; variant?: object; attributes?: Record<string, Attribute>; unitPriceMinor: number; shippingMinor?: number | null;
-  currency: string; availability: string; url?: string;
+  currency: string; availability: string; url?: string; specs?: OfferSpecs;
 }>) {
   return tx(async (c) => {
     for (const o of offers) {
       if (o.route === "paypal" && (!o.merchantId || !o.sku || o.shippingMinor == null))
         throw new DomainError("invalid", "A payable offer needs merchant, sku and confirmed shipping");
       await c.query(
-        `INSERT INTO offers (id,task_id,source,source_offer_id,route,seller,merchant_id,sku,title,variant,attributes,unit_price_minor,shipping_minor,currency,availability,url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        `INSERT INTO offers (id,task_id,source,source_offer_id,route,seller,merchant_id,sku,title,variant,attributes,unit_price_minor,shipping_minor,currency,availability,url,specs)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          ON CONFLICT (task_id,source,source_offer_id) DO UPDATE SET unit_price_minor=EXCLUDED.unit_price_minor, shipping_minor=EXCLUDED.shipping_minor,
-           availability=EXCLUDED.availability, attributes=EXCLUDED.attributes, url=EXCLUDED.url, observed_at=now()`,
+           availability=EXCLUDED.availability, attributes=EXCLUDED.attributes, url=EXCLUDED.url, specs=EXCLUDED.specs, observed_at=now()`,
         [randomUUID(), taskId, o.source, o.sourceOfferId, o.route, o.seller, o.merchantId ?? null, o.sku ?? null, o.title,
-         JSON.stringify(o.variant ?? {}), JSON.stringify(o.attributes ?? {}), o.unitPriceMinor, o.shippingMinor ?? null, o.currency, o.availability, o.url ?? null],
+         JSON.stringify(o.variant ?? {}), JSON.stringify(o.attributes ?? {}), o.unitPriceMinor, o.shippingMinor ?? null, o.currency, o.availability, o.url ?? null, JSON.stringify(o.specs ?? {})],
       );
     }
   });
@@ -158,7 +159,7 @@ export async function getComparison(taskId: string, token: string) {
       return {
         id: o.id, title: o.title, seller: o.seller, route: o.route, sku: o.sku, variant: o.variant,
         priceMinor: o.unit_price_minor, shippingMinor: o.shipping_minor, currency: o.currency, availability: o.availability,
-        url: o.route === "external" ? o.url : null, observedAt: o.observed_at, source: o.source,
+        url: o.route === "external" ? o.url : null, observedAt: o.observed_at, source: o.source, specs: o.specs as OfferSpecs,
         status: e.status === "eligible" && !stocked ? "ineligible" : e.status === "eligible" && !anyEssential ? "unchecked" : e.status,
         checks: e.checks,
       };

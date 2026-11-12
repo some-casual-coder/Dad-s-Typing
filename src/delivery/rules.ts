@@ -27,11 +27,6 @@ export const RULES = {
     customs: "unknown" as const,
     customsNote: "Homepage says it handles customs and applicable taxes; whether the Kenya rate includes them is unconfirmed.",
   },
-  fx: {
-    source: "Operator-set indicative rates, not a quote",
-    kesPerMinorUnit: { USD: 129, GBP: 168 } as Record<string, number>,
-    bufferPct: { USD: 5, GBP: 7 } as Record<string, number>,
-  },
 };
 
 export const SOURCE_URLS: Record<Provider, { estimator: string; quote: string }> = {
@@ -40,12 +35,3 @@ export const SOURCE_URLS: Record<Provider, { estimator: string; quote: string }>
 };
 
 export const comp = (c: Omit<Component, "asOf">): Component => ({ ...c, asOf: RULES_AS_OF });
-
-export function toKes(minor: number, currency: string): { low: number; high: number } | null {
-  const rate = RULES.fx.kesPerMinorUnit[currency];
-  const buffer = RULES.fx.bufferPct[currency];
-  if (rate === undefined || buffer === undefined) return null;
-  // Rates are KES per whole unit; minor units are hundredths on both sides
-  const low = Math.round(minor * rate);
-  return { low, high: Math.round(low * (1 + buffer / 100)) };
-}

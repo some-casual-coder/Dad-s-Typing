@@ -1,6 +1,7 @@
 import { buyForMeFee, customs, freight, isPriced, kentexInsurance, kentexServiceFee, kenyaDelivery, salesTax, sumKnown } from "./estimate";
 import { handoffFor } from "./handoff";
-import { comp, RULES, RULES_AS_OF, toKes } from "./rules";
+import type { FxTable } from "./fx";
+import { comp, RULES_AS_OF } from "./rules";
 import type { Component, Destination, ImportedQuote, Mode, OfferInput, Parcel, Plan, Prefs, Provider, RouteKind } from "./types";
 
 export interface Inputs {
@@ -9,6 +10,7 @@ export interface Inputs {
   destination: Destination | null;
   prefs: Prefs;
   parcel: Parcel;
+  fx: FxTable;
   now: Date;
 }
 
@@ -119,12 +121,12 @@ function drafts(i: Inputs): Draft[] {
   return out;
 }
 
-function underBudget(parts: Component[], kes: Plan["kes"], complete: boolean, prefs: Prefs): Plan["underBudget"] {
+function underBudget(parts: Component[], kes: Plan["kes"], complete: boolean, prefs: Prefs, fx: FxTable): Plan["underBudget"] {
   const budget = prefs.budgetKesMinor;
   if (budget === undefined) return "unknown";
   // A budget that excludes delivery is compared with the item alone
   const counted = prefs.budgetIncludesDelivery === false ? parts.filter((c) => c.key === "item") : parts;
-  const k = prefs.budgetIncludesDelivery === false ? sumKnown(counted).kes : kes;
+  const k = prefs.budgetIncludesDelivery === false ? sumKnown(counted, fx).kes : kes;
   if (!k) return "unknown";
   if (k.low > budget) return "no";
   const all = prefs.budgetIncludesDelivery === false ? counted.every(isPriced) : complete;
@@ -140,15 +142,15 @@ export function buildPlans(i: Inputs): Plan[] {
     const usable = q && !expired && (provider === "aquantuo" || provider === "kentex");
     const parts = usable ? quotedParts(d.offer, q, provider as Provider) : d.parts;
     const complete = d.availability === "available" && parts.every(isPriced);
-    const sums = sumKnown(parts);
+    const sums = sumKnown(parts, i.fx);
     const kes = sums.kes ? { low: sums.kes.low, high: sums.kes.high } : null;
-    const under = underBudget(parts, kes, complete, i.prefs);
+    const under = underBudget(parts, kes, complete, i.prefs, i.fx);
     const info = (d.provider === "aquantuo" || d.provider === "kentex") && d.availability === "available"
       ? handoffFor(d.provider, d.mode as Mode, d.offer, i.destination, i.parcel, i.prefs) : null;
     return {
       id: `${d.offer.id}:${d.provider}:${d.mode}`, offerId: d.offer.id, route: d.route, provider: d.provider, mode: d.mode,
       title: TITLES[d.mode] ?? (d.route === "local" ? `Buy from ${d.offer.seller}` : `Buy at ${d.offer.seller}`),
-      exact: d.offer.exact, availability: d.availability, why: usable ? `Uses your ${provider} quote.` : q && expired ? "Your saved quote has expired. Get a fresh one." : d.why,
+      exact: d.offer.exact, match: d.offer.match ?? null, availability: d.availability, why: usable ? `Uses your ${provider} quote.` : q && expired ? "Your saved quote has expired. Get a fresh one." : d.why,
       components: parts, complete, knownMinor: sums.single?.low ?? null, knownHighMinor: sums.single?.high ?? null,
       knownCurrency: sums.single?.cur ?? null, kes, underBudget: under,
       quote: q ? { reference: q.reference, expired, expiresAt: q.expiresAt } : null,
@@ -164,5 +166,3 @@ export function cheapestDelivered(plans: Plan[]): string | null {
   return ok[0]?.id ?? null;
 }
 
-export const kesFor = toKes;
-export const fxSource = RULES.fx.source;

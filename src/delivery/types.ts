@@ -1,3 +1,6 @@
+import type { OfferSpecs } from "@/adapters/types";
+import type { Identity } from "./identity";
+
 export type CostStatus = "known" | "estimated" | "included" | "unknown" | "not_applicable";
 export type Provider = "aquantuo" | "kentex";
 export type Mode = "self_buy" | "buy_for_me" | "amazon_buy_ship" | "forwarding";
@@ -49,7 +52,10 @@ export interface OfferInput {
   shippingMinor: number | null;
   currency: string;
   url: string | null;
+  // Closest match by identity evidence, not by confirmed requirements
   exact: boolean;
+  match?: Identity;
+  specs?: OfferSpecs;
 }
 
 export interface ImportedQuote {
@@ -86,6 +92,7 @@ export interface Plan {
   mode: Mode | "direct" | "local";
   title: string;
   exact: boolean;
+  match: Identity | null;
   availability: Availability;
   why: string;
   components: Component[];

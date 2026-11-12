@@ -56,8 +56,14 @@ describe("delivery api", () => {
     expect(k.complete).toBe(true);
     expect(k.knownMinor).toBe(9000);
     expect(d.json.plans.find((p: { route: string }) => p.route === "local").complete).toBe(true);
-    // Unverified offers are not exact, so nothing is called cheapest yet
-    expect(d.json.cheapestId).toBeNull();
+    // No requirement was confirmed, yet identity evidence makes both closest matches
+    const local = d.json.plans.find((p: { route: string }) => p.route === "local");
+    expect(local.exact).toBe(true);
+    expect(local.match.matched).toContain("carrier");
+    expect(d.json.cheapestId).toBe(local.id);
+    // FX carries its source and date; offline in tests, so it says so
+    expect(d.json.fx.USD).toMatchObject({ stale: true, rateDate: expect.any(String), source: expect.any(String) });
+    expect(d.json.fxSource).toContain("may be out of date");
   });
 
   it("fails closed for the wrong or missing access", async () => {

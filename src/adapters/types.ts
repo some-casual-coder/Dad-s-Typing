@@ -34,7 +34,18 @@ export interface Interpreter {
 export interface ExternalOffer {
   source: "channel3"; sourceOfferId: string; route: "external"; seller: string; title: string;
   attributes: Record<string, Attribute>; unitPriceMinor: number; shippingMinor: null;
-  currency: string; availability: "InStock" | "OutOfStock"; url: string;
+  currency: string; availability: "InStock" | "OutOfStock"; url: string; specs: OfferSpecs;
+}
+
+// Merchant-supplied item facts; packed parcel values are ours and estimated
+export interface OfferSpecs {
+  weightGrams?: number; lengthMm?: number; widthMm?: number; heightMm?: number;
+  dimsSource?: string; category?: string[]; brand?: string; imageUrl?: string;
+}
+
+export interface FxSource {
+  // KES per one unit of currency, with the date the source published it
+  kesRate(currency: "USD" | "GBP"): Promise<{ rate: number; date: string; source: string }>;
 }
 
 export interface Discovery {

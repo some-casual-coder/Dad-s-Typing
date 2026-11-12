@@ -3,6 +3,8 @@ import { withAssist } from "@/delivery/assist";
 import { amazonUsListing, buildPlans, cheapestDelivered, type Inputs } from "@/delivery/compare";
 import { freight, volumetricKg } from "@/delivery/estimate";
 import { nextAction } from "@/delivery/steps";
+import { FALLBACK_FX, fxLabel, toKes } from "@/delivery/fx";
+import { closestMatch, identity } from "@/delivery/identity";
 import type { ImportedQuote, OfferInput, Plan } from "@/delivery/types";
 
 const NOW = new Date("2026-11-12T10:00:00Z");
@@ -14,7 +16,7 @@ const uk: OfferInput = { ...amazon, id: "U", seller: "amazon.co.uk", currency: "
 const parcel = { weightGrams: 2000, lengthMm: 300, widthMm: 200, heightMm: 150 };
 
 const base = (o: Partial<Inputs>): Inputs => ({ offers: [local, amazon], quotes: [], destination: { country: "KE", county: "Nairobi", city: "Westlands" },
-  prefs: { handling: "door" }, parcel, now: NOW, ...o });
+  prefs: { handling: "door" }, parcel, fx: FALLBACK_FX, now: NOW, ...o });
 const find = (ps: Plan[], offerId: string, provider: string, mode: string) => ps.find((p) => p.offerId === offerId && p.provider === provider && p.mode === mode)!;
 const quote = (o: Partial<ImportedQuote>): ImportedQuote => ({ id: "q", offerId: "A", provider: "kentex", mode: "amazon_buy_ship", reference: "KQ-1", amountMinor: 9000,
   currency: "USD", includesItem: true, includesCustoms: true, includesDelivery: true, expiresAt: "2026-11-20T00:00:00Z", ...o });
@@ -181,5 +183,26 @@ describe("delivery comparison", () => {
     expect(fs.minor).toBe(3600);
     expect(fu.note).toMatch(/UK rate is unconfirmed/);
     expect(uk2.complete).toBe(false);
+  });
+});
+
+describe("identity and fx", () => {
+  it("scores identity by the words the AI named, ignoring filler", () => {
+    const m = identity("Top-opening cat carrier for Mum", { title: "Sherpa top opening pet carrier", category: ["cat-carriers"] });
+    expect(m.score).toBe(1);
+    expect(identity("cat carrier", { title: "Dog bed" }).score).toBe(0);
+  });
+  it("an item with no confirmed requirements can still be the best closest match", () => {
+    expect(closestMatch("unchecked", 0.8, 0.8)).toBe(true);
+    expect(closestMatch("unchecked", 0.5, 0.9)).toBe(false);
+    expect(closestMatch("unresolved", 1, 1)).toBe(false);
+    const ps = buildPlans(base({ offers: [{ ...local, exact: closestMatch("unchecked", 1, 1) }], quotes: [] }));
+    expect(cheapestDelivered(ps)).toBe(ps[0].id);
+  });
+  it("converts in integer minor units with a buffer and keeps provenance", () => {
+    const fx = { USD: { ...FALLBACK_FX.USD, kesPerUnitMicro: 129_950_000, stale: false, source: "CBK" } };
+    expect(toKes(5700, "USD", fx)).toEqual({ low: 740_715, high: 777_751 });
+    expect(toKes(100, "EUR", fx)).toBeNull();
+    expect(fxLabel(fx)).toContain("1 USD = KSh 129.95 (CBK");
   });
 });

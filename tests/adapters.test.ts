@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { validateInterpretation, GeminiInterpreter } from "@/adapters/gemini";
 import { mapProduct, Channel3Discovery } from "@/adapters/channel3";
+import { FrankfurterCbk } from "@/adapters/fx";
 import { PayPalPayments, discoverMerchantId, isSandboxPayPalUrl } from "@/adapters/paypal";
 import { OpenRouterInterpreter } from "@/adapters/openrouter";
 import { AdapterError } from "@/adapters/types";
@@ -159,12 +160,27 @@ describe("channel3 mapping", () => {
     expect(mapProduct(product({ offers: [{ url: "http://x.test", price: { price: 1, currency: "USD" } }] }))).toBeNull();
     expect(mapProduct(product({ offers: [{ url: "https://x.test", price: { price: "1", currency: "USD" } }] }))).toBeNull();
   });
+  it("keeps merchant item weight and size in mm and grams, with the source", () => {
+    const dims = { weight: { number: 2.2, unit: "lb" }, length: { number: 18, unit: "in" }, width: { number: 30, unit: "cm" }, height: { number: 0.3, unit: "m" } };
+    const o = mapProduct(product({ offers: [{ url: "https://buy.example/x", domain: "shop.test", price: { price: 35.99, currency: "USD" }, availability: "InStock", dimensions: dims }],
+      category: { slug: "cat-carriers", path: [{ slug: "pet-supplies" }] }, brands: [{ name: "Sherpa" }], images: [{ url: "https://img.test/a.jpg", is_main_image: true }] }))!;
+    expect(o.specs).toMatchObject({ weightGrams: 998, lengthMm: 457, widthMm: 300, heightMm: 300, brand: "Sherpa", imageUrl: "https://img.test/a.jpg",
+      category: ["pet-supplies", "cat-carriers"] });
+    expect(o.specs.dimsSource).toMatch(/this seller.*unpacked/);
+  });
+  it("drops partial or nonsense dimensions instead of guessing", () => {
+    const o = mapProduct(product({ offers: [{ url: "https://buy.example/x", price: { price: 1, currency: "USD" }, availability: "InStock",
+      dimensions: { weight: { number: -1, unit: "kg" }, length: { number: 10, unit: "cm" }, width: { number: 5, unit: "furlong" } } }] }))!;
+    expect(o.specs.weightGrams).toBeUndefined();
+    expect(o.specs.lengthMm).toBeUndefined();
+    expect(o.specs.dimsSource).toBeUndefined();
+  });
   it("posts the documented body and refuses other countries", async () => {
     const f = stub(json({ products: [product()] }));
     const d = new Channel3Discovery("key");
     expect(await d.search({ query: "cat carrier", country: "GB", limit: 3 })).toHaveLength(1);
     const init = f.mock.calls[0][1] as unknown as RequestInit;
-    expect(JSON.parse(init.body as string)).toEqual({ query: "cat carrier", limit: 3, config: { country: "GB" } });
+    expect(JSON.parse(init.body as string)).toEqual({ query: "cat carrier", limit: 3, config: { country: "GB", weight_unit: "kg", length_unit: "cm" } });
     await expect(d.search({ query: "x", country: "KE" as "US", limit: 1 })).rejects.toBeInstanceOf(AdapterError);
   });
 });
@@ -215,5 +231,15 @@ describe("refund error classification", () => {
       stub(token(), json({ name: "X" }, code));
       await expect(pay().refundCapture("CAP123456", { amountMinor: 100, currency: "USD", requestId: "r" })).rejects.toMatchObject({ kind });
     }
+  });
+});
+
+describe("fx source", () => {
+  it("reads the CBK rate and refuses an unexpected shape", async () => {
+    const f = stub(json([{ date: "2026-11-11", base: "USD", quote: "KES", rate: 129.95 }]));
+    expect(await new FrankfurterCbk().kesRate("USD")).toMatchObject({ rate: 129.95, date: "2026-11-11" });
+    expect(String(f.mock.calls[0][0])).toContain("providers=CBK");
+    stub(json([{ date: "2026-11-11", base: "GBP", quote: "KES", rate: 129.95 }]));
+    await expect(new FrankfurterCbk().kesRate("USD")).rejects.toBeInstanceOf(AdapterError);
   });
 });

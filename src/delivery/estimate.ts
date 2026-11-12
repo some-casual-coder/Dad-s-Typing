@@ -1,4 +1,5 @@
-import { comp, RULES, toKes } from "./rules";
+import { toKes, type FxTable } from "./fx";
+import { comp, RULES } from "./rules";
 import type { Component, Parcel } from "./types";
 
 const MM_PER_INCH = 25.4;
@@ -65,7 +66,7 @@ export const kenyaDelivery = (provider: "aquantuo" | "kentex", handling: "pickup
   comp({ key: "kenya_delivery", label: handling === "door" ? "Delivery in Kenya" : "Pickup in Kenya", status: "unknown", currency: "USD",
     note: handling === "door" ? "The provider has not published a fee we can use." : "Pickup point and any fee are not confirmed.", source: SRC[provider] });
 
-export function sumKnown(cs: Component[]) {
+export function sumKnown(cs: Component[], fx: FxTable) {
   const parts = cs.flatMap((c) => {
     if ((c.status === "known" || c.status === "estimated") && c.minor !== undefined) return [{ cur: c.currency, low: c.minor, high: c.highMinor ?? c.minor }];
     if (c.status === "unknown" && c.lowMinor !== undefined) return [{ cur: c.currency, low: c.lowMinor, high: c.lowMinor }];
@@ -78,7 +79,7 @@ export function sumKnown(cs: Component[]) {
     ? { cur, low: parts.reduce((a, p) => a + p.low, 0), high: parts.reduce((a, p) => a + p.high, 0) } : null;
   let low = 0, high = 0;
   for (const p of parts) {
-    const lo = toKes(p.low, p.cur), hi = toKes(p.high, p.cur);
+    const lo = toKes(p.low, p.cur, fx), hi = toKes(p.high, p.cur, fx);
     if (!lo || !hi) return { single, kes: null };
     low += lo.low; high += hi.high;
   }

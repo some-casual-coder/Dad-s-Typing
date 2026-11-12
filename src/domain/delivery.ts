@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { buildPlans, cheapestDelivered, fxSource } from "@/delivery/compare";
+import { buildPlans, cheapestDelivered } from "@/delivery/compare";
+import { fxLabel } from "@/delivery/fx";
+import { closestMatch, identity } from "@/delivery/identity";
 import { RULES_AS_OF } from "@/delivery/rules";
 import { isStep, nextAction, stepsFor } from "@/delivery/steps";
 import type { Destination, ImportedQuote, Mode, OfferInput, Parcel, Prefs, Provider } from "@/delivery/types";
@@ -7,6 +9,7 @@ import { authorize } from "./access";
 import { tx } from "./db";
 import { DomainError } from "./errors";
 import { logEvent } from "./events";
+import { currentFx } from "./fx";
 import { getComparison } from "./tasks";
 
 export interface DeliveryInput {
@@ -102,8 +105,11 @@ export async function markStep(taskId: string, token: string, b: { offerId: stri
 
 export async function getDelivery(taskId: string, token: string, now = new Date()) {
   const cmp = await getComparison(taskId, token);
+  const fx = await currentFx(now);
   return tx(async (c) => {
     await authorize(c, taskId, token, "view");
+    const t = (await c.query(`SELECT title, search_query FROM tasks WHERE id=$1`, [taskId])).rows[0];
+    const reference = (t?.search_query || t?.title || "") as string;
     const row = (await c.query(`SELECT * FROM delivery_plans WHERE task_id=$1`, [taskId])).rows[0];
     const input: DeliveryInput = {
       county: row?.county ?? "", city: row?.city ?? "", handling: row?.handling ?? "door",
@@ -119,9 +125,12 @@ export async function getDelivery(taskId: string, token: string, now = new Date(
     }));
     const steps = (await c.query(`SELECT offer_id,provider,mode,step FROM delivery_steps WHERE task_id=$1`, [taskId])).rows;
 
-    const offers: OfferInput[] = cmp.offers.filter((o) => o.status !== "ineligible" && o.availability === "InStock").map((o) => ({
+    const live = cmp.offers.filter((o) => o.status !== "ineligible" && o.availability === "InStock")
+      .map((o) => ({ o, match: identity(reference, { title: o.title, brand: o.specs?.brand, category: o.specs?.category }) }));
+    const best = Math.max(0, ...live.filter((x) => x.o.status !== "unresolved").map((x) => x.match.score));
+    const offers: OfferInput[] = live.map(({ o, match }) => ({
       id: o.id, title: o.title, seller: o.seller, route: o.route, priceMinor: o.priceMinor, shippingMinor: o.shippingMinor,
-      currency: o.currency, url: o.url, exact: o.status === "eligible",
+      currency: o.currency, url: o.url, exact: closestMatch(o.status, match.score, best), match, specs: o.specs,
     }));
     const destination: Destination | null = input.county || input.city ? { country: "KE", county: input.county, city: input.city } : null;
     const prefs: Prefs = { handling: input.handling, ...(input.budgetKesMinor ? { budgetKesMinor: input.budgetKesMinor } : {}),
@@ -131,13 +140,13 @@ export async function getDelivery(taskId: string, token: string, now = new Date(
       ...(input.widthMm ? { widthMm: input.widthMm } : {}), ...(input.heightMm ? { heightMm: input.heightMm } : {}),
       ...(input.hub ? { hub: input.hub } : {}),
     };
-    const plans = buildPlans({ offers, quotes, destination, prefs, parcel, now });
+    const plans = buildPlans({ offers, quotes, destination, prefs, parcel, fx, now });
     const done = (p: { offerId: string; provider: string; mode: string }) =>
       steps.filter((s) => s.offer_id === p.offerId && s.provider === p.provider && s.mode === p.mode).map((s) => s.step as string);
     const progress = plans.filter((p) => p.route === "forward").flatMap((p) => {
       const d = done(p);
       return d.length ? [{ planId: p.id, done: d, next: nextAction(p.mode, d) }] : [];
     });
-    return { input, plans, cheapestId: cheapestDelivered(plans), progress, asOf: RULES_AS_OF, fxSource };
+    return { input, plans, cheapestId: cheapestDelivered(plans), progress, asOf: RULES_AS_OF, fx, fxSource: fxLabel(fx) };
   });
 }
