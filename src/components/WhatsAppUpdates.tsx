@@ -22,7 +22,7 @@ export default function WhatsAppUpdates({ taskId, token }: { taskId: string; tok
       {j.whatsappLink
         ? <a className="btn small-btn" href={j.whatsappLink} target="_blank" rel="noopener noreferrer">Open WhatsApp and send JOIN {j.code}</a>
         : <p>Send <strong>JOIN {j.code}</strong> to our WhatsApp number.</p>}
-      <p className="muted">You&apos;ll get a message when it is paid, ordered, arrives and is ready to collect, with the pickup location. Reply STOP any time. The code works once, for 7 days.</p>
+      <p className="muted">Updates when it&apos;s paid, ordered, arrives and is ready to collect. Reply STOP any time. Code works once, for 7 days.</p>
     </div>
   );
 }

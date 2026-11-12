@@ -23,8 +23,8 @@ function Card({ o, canChoose, busyId, disabled, onChoose }: { o: Offer } & Omit<
       <p className="price">{formatMoney(o.priceMinor, o.currency)}</p>
       <p className="muted">{deliveryText(o.shippingMinor, o.currency)} · {o.availability === "InStock" ? "In stock" : o.availability}</p>
       <p className="small"><span className="tag">{sourceLabel(o.route)}</span></p>
-      {o.status === "unchecked" && <p className="small">Nothing has been checked yet. Tell us what matters first.</p>}
-      {o.status === "unresolved" && <p className="small">Not verified. We can&apos;t confirm this meets what you need.</p>}
+      {o.status === "unchecked" && <p className="small">Tell us what matters to check these.</p>}
+      {o.status === "unresolved" && <p className="small">Not verified against what you need.</p>}
       {reasons.length > 0 && (
         <ul className="reasons">{reasons.map((c, i) => <li key={i}>{c.reason}</li>)}</ul>
       )}
@@ -45,7 +45,7 @@ export default function Comparison(props: Props) {
   return (
     <section className="card stack" aria-labelledby="cmp-h">
       <h2 id="cmp-h">Options</h2>
-      {props.offers.length === 0 && <p className="muted">No options yet. They appear once we know what you need.</p>}
+      {props.offers.length === 0 && <p className="muted">Options appear once we know what you need.</p>}
       <ul className="offers">
         {shown.map((o) => <Card key={o.id} o={o} {...props} />)}
       </ul>

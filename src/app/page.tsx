@@ -75,9 +75,8 @@ export default function Home() {
         <p className="eyebrow">Dad&apos;s Typing...</p>
         <h1>Send a photo. Pick one. Pay once. Get a date.</h1>
         <p className="lead">
-          Share a photo or say what you want. We find it and close alternatives, delivered to
-          Kenya, with a price in shillings and an arrival date. Shopping for someone? Send them
-          a link to choose, or to pay.
+          Delivered to Kenya, priced in shillings, with an arrival date. Shopping for someone? Send
+          them a link to choose.
         </p>
       </header>
 
@@ -117,8 +116,7 @@ export default function Home() {
               )}
             </div>
             <p className="muted">
-              &quot;Start for me&quot; lets you find, choose and pay yourself. &quot;Start for Mum&quot; sets
-              you up to pay, then sends her a link to choose.
+              &quot;Start for Mum&quot;: she chooses, you pay.
             </p>
           </>
         )}
@@ -135,8 +133,7 @@ export default function Home() {
       </section>
 
       <p className="muted small">
-        This is a demo. The chat is simulated in your browser, not WhatsApp. Payments use PayPal
-        Sandbox and the shop is a demo catalogue, so no real money moves.
+        Demo · PayPal Sandbox, no real money moves.
       </p>
     </main>
   );

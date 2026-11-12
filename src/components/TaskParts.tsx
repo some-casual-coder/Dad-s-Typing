@@ -46,7 +46,7 @@ export function MustHave({ reqs, canConfirm, onConfirm }: { reqs: Requirement[];
             <li key={r.id}><span>{requirementLabel(r)}</span> <span className="tag">{r.essential ? "Must have" : "Nice to have"}</span>
               <span className="tag">{r.status === "confirmed" ? "Confirmed" : "Not confirmed yet"}</span></li>
           ))}
-          <li className="muted">To change one, say it in the chat, e.g. &quot;it doesn&apos;t need to open from the top&quot;.</li>
+          <li className="muted">To change one, just say so in the chat.</li>
         </ul>
       )}
     </div>
@@ -64,7 +64,7 @@ export function ShareMenu({ taskId, token, roles, stage }: { taskId: string; tok
       <summary>{stage === "pay" ? "Someone else paying? Send them a link" : lead ? "Send it to Mum to choose" : "Share"}</summary>
       <div className="stack">
         {mum && <ShareInvite taskId={taskId} token={token} roles={["requester", "chooser"]} label="Mum" buttonText="Send to Mum to choose"
-          hint="She can ask questions, correct details and choose herself. She won't see payment details." />}
+          hint="She asks, corrects and chooses. No payment details." />}
         <ShareInvite taskId={taskId} token={token} roles={["payer"]} label="Payer" buttonText="Send to someone to pay"
           hint="They see the exact total and pay in PayPal. They can't change the choice." />
         {stage !== "pay" && (

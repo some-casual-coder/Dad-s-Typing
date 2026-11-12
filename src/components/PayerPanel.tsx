@@ -72,7 +72,7 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
           )}
         </>
       ) : !err && !p?.changed && <p role="status" className="muted">Working out the total...</p>}
-      {changed && <p className="note" role="alert">The total changed since you looked. Check the amount above, then tap Pay again.</p>}
+      {changed && <p className="note" role="alert">The total changed. Check it, then tap Pay again.</p>}
       {p?.changed && (
         <div className="note stack" role="alert">
           <p>{p.changed.toMinor !== null ? `The price changed since this was chosen. It's now ${formatMoney(p.changed.toMinor, p.changed.currency)}.` : "This item is no longer available at that price or is out of stock."}</p>

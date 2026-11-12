@@ -212,7 +212,7 @@ export default function TaskPage({ taskId }: { taskId: string }) {
         </>
       )}
 
-      <p className="muted small">Demo: this chat runs in your browser. Payments use PayPal Sandbox.</p>
+      <p className="muted small">Demo · PayPal Sandbox, no real money.</p>
     </main>
   );
 }

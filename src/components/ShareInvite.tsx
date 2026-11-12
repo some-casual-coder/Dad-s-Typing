@@ -60,7 +60,7 @@ export default function ShareInvite({ taskId, token, roles, label, buttonText, h
               <button className="btn secondary" onClick={share}>Share</button>
             )}
           </div>
-          <p className="muted">Anyone with this link can act in this task with these permissions. Send it only to the person you mean.</p>
+          <p className="muted">Anyone with this link gets these permissions. Send it only to them.</p>
         </div>
       )}
       <p role="status" aria-live="polite" className="muted">{msg}</p>

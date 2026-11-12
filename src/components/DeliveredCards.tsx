@@ -119,7 +119,7 @@ export default function DeliveredCards({ taskId, token, refreshKey, canEdit, can
       <h2 id="dc-h">Delivered to Kenya</h2>
       <DestinationAsk taskId={taskId} token={token} dest={v.destination} canEdit={canEdit} onChanged={load} />
       {recommendation && <p className="lead">{recommendation}</p>}
-      {closest.length === 0 && similar.length === 0 && <p className="muted">No options yet. They appear once we know what you need.</p>}
+      {closest.length === 0 && similar.length === 0 && <p className="muted">Options appear once we know what you need.</p>}
       {closest.length > 0 && <><h3>Closest match</h3>{list(closest)}</>}
       {similar.length > 0 && <><h3>Similar</h3>{list(similar)}</>}
       {more.length > 0 && <details className="more"><summary>More options ({more.length})</summary>{list(more)}</details>}
