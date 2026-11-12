@@ -69,7 +69,7 @@ test("wrong format is refused with copy; server-rejected bytes retry safely", as
   await page.getByRole("button", { name: "Start with this photo" }).click();
   await page.waitForURL(/\/t\/[0-9a-f-]+/);
   // The reply may sit in the collapsed conversation once options show
-  await expect(page.getByRole("list", { name: "Messages" }).locator("li.assistant p").first()).toBeAttached({ timeout: 60_000 });
+  await expect(page.getByRole("list", { name: "Messages", includeHidden: true }).locator("li.assistant p").first()).toBeAttached({ timeout: 60_000 });
   expect(calls.tasks).toBe(1); // the failed attempt's task was reused
 });
 
@@ -105,5 +105,5 @@ test("composer: remove, replace, same-file reselect, typed fallback, keyboard", 
   await page.getByLabel("Your message").fill("It must open from the top");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   // The reply may sit in the collapsed conversation once options show
-  await expect(page.getByRole("list", { name: "Messages" }).locator("li.assistant p").first()).toBeAttached({ timeout: 60_000 });
+  await expect(page.getByRole("list", { name: "Messages", includeHidden: true }).locator("li.assistant p").first()).toBeAttached({ timeout: 60_000 });
 });
