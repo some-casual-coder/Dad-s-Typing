@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Chat from "./Chat";
 import Comparison from "./Comparison";
+import Delivery from "./Delivery";
 import PayerPanel from "./PayerPanel";
 import ShareInvite from "./ShareInvite";
 import {
@@ -182,6 +183,9 @@ export default function TaskPage({ taskId }: { taskId: string }) {
       )}
       <Comparison offers={cmp?.offers ?? []} canChoose={chooseOn} busyId={choosing}
         disabled={!cmp} onChoose={choose} />
+      {cmp && cmp.offers.length > 0 && !view.order && (
+        <Delivery taskId={taskId} token={token} canEdit={canDo(roles, "message")} refreshKey={cmp.version} />
+      )}
 
       {canDo(roles, "invite") && (
         <section className="card stack" aria-labelledby="ask-h">

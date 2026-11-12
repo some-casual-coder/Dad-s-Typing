@@ -18,6 +18,7 @@ tied to the same task.
 | Connectors | The engine is channel-agnostic. A WhatsApp connector (Go, Whatsmeow, an unofficial client) is in `connectors/whatsapp`; it has been tested against the app with a fake transport only, not against real WhatsApp. SMS and others plug in the same way. |
 | Refunds | Operator-only, sandbox. There is no public refund control and no merchant UI: a signed local command (`scripts/operator-refund.mjs`, needs `OPERATOR_SECRET`) issues them. Buyers see refunded and pending amounts on the receipt, separate from the payment. |
 | Webhook | `POST /api/webhooks/paypal` is off unless `PAYPAL_WEBHOOK_ID` is set and a reachable HTTPS URL is registered on the sandbox app. Without it the app reconciles payments and refunds by polling PayPal. |
+| Kenya delivery | A comparison of buying locally, buying direct, or buying in the US/UK and using a forwarder (Aquantuo, Kentex). Estimates come from dated, sourced rate fixtures and are **not quotes**; unknown costs stay Unknown and an incomplete total can never be "cheapest delivered". The shopper completes every provider step and payment on the provider's site. No provider account, API or live quote is used. Aquantuo's rate is second-hand and its customs inclusion is unconfirmed. Browser autofill is a fixture-only seam and is off. |
 | Not verified | A real phone gallery/camera pick, a real microphone on a phone, Kenyan-accented or Kiswahili speech, a delivered PayPal webhook, and real WhatsApp. |
 
 ## Run it locally

@@ -1,3 +1,4 @@
+import type { Plan } from "@/delivery/types";
 import { newId, tokenKey, type NextAction, type OfferStatus, type Role } from "./format";
 
 export class ApiError extends Error {
@@ -37,6 +38,14 @@ export interface ChatMessage {
 }
 export interface Proposal {
   key: string; op: string; value: string | number; unit?: string; essential: boolean; quote: string;
+}
+export interface DeliveryInputs {
+  county: string; city: string; handling: "pickup" | "door"; budgetKesMinor: number | null; budgetIncludesDelivery: boolean | null;
+  weightGrams: number | null; lengthMm: number | null; widthMm: number | null; heightMm: number | null; hub: "texas" | "delaware" | null;
+}
+export interface DeliveryView {
+  input: DeliveryInputs; plans: Plan[]; cheapestId: string | null; asOf: string; fxSource: string;
+  progress: { planId: string; done: string[]; next: { step: string | null; text: string } }[];
 }
 export interface SendResult { messages: ChatMessage[]; proposals: Proposal[]; clarification: string | null }
 
@@ -86,6 +95,10 @@ export const api = {
   },
   getTask: (id: string, token: string) => call<TaskView>("GET", t(id), { token }),
   getComparison: (id: string, token: string) => call<Comparison>("GET", `${t(id)}/comparison`, { token }),
+  getDelivery: (id: string, token: string) => call<DeliveryView>("GET", `${t(id)}/delivery`, { token }),
+  saveDelivery: (id: string, token: string, body: DeliveryInputs) => call<{ ok: true }>("PUT", `${t(id)}/delivery`, { token, body }),
+  addQuote: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/quotes`, { token, body }),
+  markStep: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/steps`, { token, body }),
   getMessages: (id: string, token: string) =>
     call<{ messages: ChatMessage[]; proposals: Proposal[] }>("GET", `${t(id)}/messages`, { token }),
   sendMessage: (id: string, token: string, body: {

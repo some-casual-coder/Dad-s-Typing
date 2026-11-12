@@ -1,0 +1,45 @@
+import type { Component, Provider } from "./types";
+
+// Dated, sourced fixtures. Nothing here is a quote.
+export const RULES_AS_OF = "2026-11-12";
+
+export const RULES = {
+  kentex: {
+    source: "kentexcargo.com/help/air-shipping-kenya, read 2026-11-12",
+    airUsdPerKgMinor: 1799,
+    minimumUsdMinor: { texas: 5000, delaware: 10000 } as Record<string, number>,
+    // Inches cubed per kg, from the same page
+    volumetricInchesDivisor: 306,
+    customs: "included" as const,
+    customsNote: "Provider says clearance, duties and import taxes are in the rate for standard personal shipments; VAT is not mentioned.",
+  },
+  aquantuo: {
+    source: "aquantuo.com via a second-hand report, not verified 2026-11-12",
+    airUsdPerKgMinor: 1800,
+    buyForMeFeePct: 7.5,
+    // Divisor not published on a page we could read
+    customs: "unknown" as const,
+    customsNote: "Homepage says it handles customs and applicable taxes; whether the Kenya rate includes them is unconfirmed.",
+  },
+  fx: {
+    source: "Operator-set indicative rates, not a quote",
+    kesPerMinorUnit: { USD: 129, GBP: 168 } as Record<string, number>,
+    bufferPct: { USD: 5, GBP: 7 } as Record<string, number>,
+  },
+};
+
+export const SOURCE_URLS: Record<Provider, { estimator: string; quote: string }> = {
+  aquantuo: { estimator: "https://aquantuo.com/Price-Estimator", quote: "https://aquantuo.com/request-a-quote" },
+  kentex: { estimator: "https://kentexcargo.com/help/air-shipping-kenya", quote: "https://kentexcargo.com/ke/amazon" },
+};
+
+export const comp = (c: Omit<Component, "asOf">): Component => ({ ...c, asOf: RULES_AS_OF });
+
+export function toKes(minor: number, currency: string): { low: number; high: number } | null {
+  const rate = RULES.fx.kesPerMinorUnit[currency];
+  const buffer = RULES.fx.bufferPct[currency];
+  if (rate === undefined || buffer === undefined) return null;
+  // Rates are KES per whole unit; minor units are hundredths on both sides
+  const low = Math.round(minor * rate);
+  return { low, high: Math.round(low * (1 + buffer / 100)) };
+}
