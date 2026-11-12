@@ -1,3 +1,4 @@
+import "./env";
 import { describe, expect, it } from "vitest";
 import { isKenyanNumber, placeFromPin, placeFromText } from "@/delivery/places";
 import { answerFromText } from "@/domain/destination";
@@ -32,5 +33,15 @@ describe("place labels", () => {
     expect(placeLabel({ area: "near Kisumu", county: "Kisumu" })).toBe("near Kisumu");
     expect(placeLabel({ area: "Westlands", county: "Nairobi" })).toBe("Westlands, Nairobi");
     expect(placeLabel({ area: "", county: "Nairobi" })).toBe("Nairobi");
+  });
+});
+
+describe("destination input never takes a street address", () => {
+  it("keeps an unknown town but refuses an address", async () => {
+    const { createTask } = await import("@/domain/tasks");
+    const { setDestination } = await import("@/domain/destination");
+    const t = await createTask({ title: "x", starterRoles: ["requester", "chooser"], starterLabel: "Me" });
+    expect(await setDestination(t.taskId, t.token, { place: "Kakuma" })).toEqual({ county: "Kakuma", area: "" });
+    await expect(setDestination(t.taskId, t.token, { place: "14 Riverside Drive, Apt 3" })).rejects.toMatchObject({ code: "invalid" });
   });
 });

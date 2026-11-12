@@ -329,3 +329,10 @@ describe("card wording with overlapping ranges", () => {
     expect(difference(mk("B", 5_000_000, 6_000_000), mk("A", 3_000_000, 4_000_000))).toBe("KSh 20,000 dearer.");
   });
 });
+
+describe("packaging priors order", () => {
+  it("treats a carrier crate as a carrier, a plain crate as a crate", () => {
+    expect(estimateParcel({ title: "Top Load Dog & Cat Carrier Crate" }).kind).toBe("pet carrier");
+    expect(estimateParcel({ title: "Folding wire dog crate 36 inch" }).kind).toBe("crate");
+  });
+});

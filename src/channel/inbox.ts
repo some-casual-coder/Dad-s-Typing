@@ -86,6 +86,11 @@ async function purgeOld() {
   await tx(async (c) => {
     await c.query(`DELETE FROM channel_inbox WHERE state IN ('done','failed') AND created_at < now() - interval '7 days'`);
     await c.query(`DELETE FROM channel_outbox WHERE state IN ('sent','failed','unknown') AND updated_at < now() - interval '7 days'`);
+    // Status pushes stop 14 days after delivery or cancellation, and after 120 days regardless
+    await c.query(`DELETE FROM channel_subscriptions s WHERE s.created_at < now() - interval '120 days'
+      OR EXISTS (SELECT 1 FROM fulfilment_events e WHERE e.task_id=s.task_id AND e.status IN ('delivered','cancelled','stock_out')
+                 AND e.occurred_at < now() - interval '14 days')`);
+    await c.query(`DELETE FROM channel_menus WHERE created_at < now() - interval '30 days'`);
   });
 }
 

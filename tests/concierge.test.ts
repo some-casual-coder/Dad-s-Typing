@@ -77,6 +77,9 @@ describe("one payment for an import (option B, sandbox)", () => {
     expect(cal.actual_grams).toBe(1500);
     const v = await getTaskView(s.taskId, s.token);
     expect(v.fulfilment!.done.map((d) => d.status)).toEqual(["paid", "ordered", "at_warehouse", "settled"]);
+    await expect(recordFulfilment(p as unknown as Payments, ev(s.order.id, "departed", { actual: { totalMinor: 100, source: "again" } })))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(p.refundCapture).toHaveBeenCalledTimes(1);
   });
 
   it("above the cap is the only re-approval, and only the payer sees money", async () => {
@@ -135,6 +138,19 @@ describe("one payment for an import (option B, sandbox)", () => {
     expect(out.slice(-2).map((r) => r.body)).toEqual([expect.stringMatching(/^Paid\. Arrives about/), "Ordered from the store."]);
     const sealed = (await pool.query(`SELECT recipient_enc FROM channel_subscriptions WHERE task_id=$1`, [s.taskId])).rows[0].recipient_enc;
     expect(sealed).not.toContain("254700000009");
+  });
+
+  it("only the payer can cancel or approve an extra", async () => {
+    gate.payments = mk();
+    const s = await paidImport();
+    const { createInvite } = await import("@/domain/tasks");
+    const mum = await createInvite(s.taskId, s.token, { roles: ["requester", "chooser"], label: "Mum" });
+    await expect(cancelOrder(gate.payments as Payments, s.taskId, mum.token)).rejects.toMatchObject({ code: "forbidden" });
+    await expect(decideExtra(s.taskId, mum.token, "approved")).rejects.toMatchObject({ code: "forbidden" });
+    const v = await getTaskView(s.taskId, mum.token);
+    expect(v.fulfilment!.money).toBeUndefined();
+    expect(v.fulfilment!.canCancel).toBe(false);
+    expect(v.order).toBeNull();
   });
 
   it("refuses one payment when the delivered cost is not complete", async () => {

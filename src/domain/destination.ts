@@ -70,8 +70,10 @@ export async function setDestination(taskId: string, token: string, b: { confirm
     let p: Place | null = null;
     if (b.confirm === true) p = cur ? { county: cur.county, area: cur.area } : DEFAULT_PLACE;
     else if (typeof b.place === "string" && b.place.trim() && b.place.length <= 80) {
-      // An unknown name is kept as typed, so nobody is blocked by our list
-      p = placeFromText(b.place) ?? { county: b.place.trim().slice(0, 80), area: "" };
+      // An unknown town is kept as typed, but never a street address
+      const typed = b.place.trim().replace(/\s+/g, " ");
+      p = placeFromText(typed) ?? (/^[\p{L}' .-]{2,40}$/u.test(typed) ? { county: typed, area: "" } : null);
+      if (!p) throw new DomainError("invalid", "Name the town or area only, not a street address");
     } else if (b.handling && cur) p = { county: cur.county, area: cur.area };
     if (!p) throw new DomainError("invalid", "Say yes or name a place");
     await putDestination(c, taskId, p, "answer", true, b.handling);

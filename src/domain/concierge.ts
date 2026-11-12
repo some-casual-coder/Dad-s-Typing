@@ -146,6 +146,7 @@ export async function recordFulfilment(payments: Payments, input: FulfilmentInpu
     await addEvent(c, o.id, o.task_id, status, input.source, `op:${input.key}`, input.note);
     if (status === "stock_out") return { captureId: o.capture_id as string, amount: "full" as const, key: `stockout:${o.id}` };
     if (!input.actual) return null;
+    if (o.settled_at || o.extra_due_minor) throw new DomainError("conflict", "This order already has its final cost");
     const actual = actualTotal(o, input.actual);
     const w = input.actual;
     if (w.grams && w.lengthMm && w.widthMm && w.heightMm) {

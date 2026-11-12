@@ -25,10 +25,10 @@ interface Prior {
   flatMm?: number;
 }
 
-// Order matters: first match wins
+// Order matters: first match wins; a "carrier crate" is a carrier
 const PRIORS: Prior[] = [
-  { kind: "crate", match: /\bcrates?\b|kennel/, grams: 9000, dims: [760, 480, 530], pack: 0.08, padGrams: 300, cushionMm: 20, flatMm: 100 },
   { kind: "pet carrier", match: /carrier|pet.?bag/, grams: 1500, dims: [450, 300, 300], pack: 0.12, padGrams: 150, cushionMm: 20 },
+  { kind: "crate", match: /\bcrates?\b|kennel/, grams: 9000, dims: [760, 480, 530], pack: 0.08, padGrams: 300, cushionMm: 20, flatMm: 100 },
   { kind: "stroller", match: /stroller|pram|pushchair/, grams: 8000, dims: [850, 500, 300], pack: 0.1, padGrams: 400, cushionMm: 30 },
   { kind: "shoes", match: /shoe|sneaker|trainer|boot|sandal|footwear/, grams: 900, dims: [330, 220, 120], pack: 0.15, padGrams: 50, cushionMm: 10 },
   { kind: "bag", match: /handbag|backpack|\bbags?\b|purse|tote|luggage/, grams: 800, dims: [350, 150, 280], pack: 0.1, padGrams: 50, cushionMm: 10 },
