@@ -1,132 +1,307 @@
-# Dad's Typing...
+# Dad's Typing
 
-A shared buying task for families. Someone describes what they need, the assistant asks
-what matters, checks exact options, and the person it is for chooses. A designated payer
-then approves the exact item and total in PayPal (Sandbox), and everyone sees a receipt
-tied to the same task.
+Shopping help that starts in the family chat. Someone sends a photo, a link or a few words.
+The assistant works out what matters, finds options with the full cost delivered to Kenya,
+the person it's for picks one, and whoever is paying approves the exact item and total with
+PayPal. Everyone sees the same receipt.
 
-**Status:** a working browser journey against PayPal Sandbox. Not a production service.
+- **Web app:** https://dads-typing.onrender.com
+- **Website:** https://dads-typing-site.onrender.com
+- **WhatsApp:** chat with *My Plug* from the website's "Try it live" section
+
+> Payments run in PayPal **Sandbox** only. No real money moves and no real orders are placed.
+
+## How it works
+
+```mermaid
+flowchart LR
+  A["Photo, link or a few words<br>(web or WhatsApp)"] --> B["AI reads it and proposes<br>what matters"]
+  B --> C["A person confirms"]
+  C --> D["Options with delivered<br>price in KSh"]
+  D --> E["The person it's for<br>chooses"]
+  E --> F["The payer approves<br>in PayPal"]
+  F --> G["Same receipt for<br>everyone, then updates"]
+```
+
+The AI only proposes. People confirm requirements, choose the item and approve the payment.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph People
+    W["Browser"]
+    P["WhatsApp"]
+  end
+  subgraph App["Next.js app (src/)"]
+    UI["Web journey"]
+    API["API routes"]
+    ENG["Channel engine<br>inbox · outbox"]
+    REC["Payment reconciler"]
+  end
+  CON["WhatsApp connector<br>(Go, connectors/whatsapp)"]
+  DB[("Postgres 16")]
+  W --> UI --> API
+  P <--> CON
+  CON -- "signed HTTP" --> ENG
+  API --> DB
+  ENG --> DB
+  REC --> DB
+  API --> PP["PayPal Sandbox"]
+  API --> OR["OpenRouter or Gemini"]
+  API --> C3["Channel3"]
+  API --> FX["Frankfurter<br>(CBK exchange rate)"]
+```
+
+The engine doesn't know about WhatsApp. A connector posts inbound messages to the app and
+sends the replies the app queues, over a signed HTTP bridge. The browser chat, WhatsApp and SMS
+all feed the same engine.
+
+### A WhatsApp message, end to end
+
+```mermaid
+sequenceDiagram
+  participant U as Shopper (WhatsApp)
+  participant C as Connector
+  participant A as App
+  participant D as Postgres
+  U->>C: "a cat carrier for Mum" + photo
+  C->>C: save to local queue (survives restarts)
+  C->>A: POST /api/channel/whatsapp/inbound (HMAC-signed)
+  A->>D: store in channel_inbox
+  A->>A: worker: interpret, search, price
+  A->>D: reply in channel_outbox
+  C->>A: POST /outbox/claim
+  A-->>C: reply text
+  C->>U: send reply
+  C->>A: POST /outbox/{id}/ack (sent / failed / unknown)
+```
+
+## Repository layout
+
+| Path | What it holds |
+|---|---|
+| `src/app` | Next.js pages and API routes (`src/app/api/...`) |
+| `src/domain` | Tasks, requirements, access grants, orders, events |
+| `src/channel` | Channel engine: registry, inbox, outbox, replies, JOIN/STOP, the My Plug opener |
+| `src/adapters` | PayPal, OpenRouter, Gemini, Channel3, Frankfurter, Supadata, speech-to-text |
+| `src/delivery` | Kenya delivered-price model, forwarders, pickup hubs |
+| `src/payments` | Capture checks and the reconciler |
+| `db/migrations` | SQL migrations, applied in order by `scripts/migrate.mjs` |
+| `connectors/whatsapp` | The WhatsApp connector (Go, whatsmeow). Its own README covers the details |
+| `scripts` | Migrations, the channel simulator, the provider check, operator refunds |
+| `tests` | Unit and integration tests (vitest) and browser tests (Playwright, `tests/e2e`) |
+| `website` | The one-page landing site (static HTML) |
+| `render.yaml` | The Render setup as a Blueprint |
+| `docs` | Product research, contracts (`API_CONTRACT.md`, `CHANNEL_CONTRACT.md`) and runbooks |
+
+## Run it locally
+
+### 1. Prerequisites
+
+- Node **22.12+** and npm
+- Docker, for Postgres
+- `ffmpeg` on your PATH, for checking shoppers' clips (`brew install ffmpeg` or `apt install ffmpeg`).
+  Set `CLIP_ANALYSIS=0` to skip it.
+
+### 2. Accounts and keys
+
+| Service | Needed for | Required? | Where to get it | Variables |
+|---|---|---|---|---|
+| PayPal Developer (Sandbox) | Checkout | Yes | [developer.paypal.com](https://developer.paypal.com) → Apps & Credentials → Sandbox app. Under Testing Tools → Sandbox Accounts, note the **Business** account's merchant id and create a **Personal** buyer to pay with | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MERCHANT_ID` |
+| OpenRouter | Understanding messages and photos, voice transcription, clip checks | Yes (or Gemini) | [openrouter.ai](https://openrouter.ai) → Keys | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `STT_MODEL` |
+| Google Gemini | Same, called directly instead of OpenRouter | Alternative | [aistudio.google.com](https://aistudio.google.com) → API keys | `INTERPRETER_PROVIDER=gemini`, `GEMINI_API_KEY`, `GEMINI_MODEL` |
+| Channel3 | Real products from US and UK shops | Optional | [trychannel3.com](https://trychannel3.com) | `CHANNEL3_API_KEY` |
+| WhatsApp | The My Plug chat | Optional | A spare number with WhatsApp installed (see below) | `WHATSAPP_*`, `CHANNEL_OPEN_START` |
+
+The exchange rate comes from [Frankfurter](https://frankfurter.dev) (Central Bank of Kenya rate) and needs no key.
+
+### 3. Start it
+
+```bash
+git clone https://github.com/some-casual-coder/Dad-s-Typing.git
+cd Dad-s-Typing
+npm install
+cp .env.example .env.local          # fill in the keys from step 2
+
+docker run -d --name dads-typing-pg -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_USER=dt -e POSTGRES_PASSWORD=dt -e POSTGRES_DB=dads_typing \
+  postgres:16-alpine                # matches DATABASE_URL in .env.example
+
+npm run db:migrate
+npm run dev                         # http://localhost:3000
+```
+
+Use `npm run build && npm start` for a production build. Next time, `docker start dads-typing-pg`
+brings the database back.
+
+### 4. Try the journey
+
+1. Open `http://localhost:3000`. Choose **Upload photo** and pick a photo of, say, a cat carrier.
+   No photo? Use **Download a sample photo** on the same screen. Add a note such as
+   "For Mum. It must open from the top", then **Start with this photo**. You can also type a request
+   or press **Speak**.
+2. The assistant proposes requirements, each with the words it relied on. Nothing applies until a
+   person confirms it.
+3. Open **Share** → **Send to Mum to choose**, and open that link in a private window (it shares no
+   sign-in). As Mum, confirm "it must open from the top": mismatches move to **Doesn't match**.
+4. Mum taps **Choose this one**. Your window moves to **Pay** with the exact item, seller and total.
+5. Tap **Pay with PayPal (sandbox)** and sign in with your sandbox **Personal** buyer.
+6. Both windows show the same receipt. Cancelling at PayPal leaves no receipt, and you can pay again.
+
+## WhatsApp
+
+The connector is a separate Go service in `connectors/whatsapp`. It links to a WhatsApp number as
+a **linked device**, the way WhatsApp Web does. It uses [whatsmeow](https://github.com/tulir/whatsmeow),
+an unofficial client, so use a **spare number**, not your personal one: WhatsApp can restrict
+numbers that behave like bots.
+
+### Try it with no phone
+
+The simulator plays the connector, so you can see the bot's replies in your terminal:
+
+```bash
+# .env.local needs WHATSAPP_BRIDGE_SECRET and either CHANNEL_OPEN_START=1
+# or your test number in WHATSAPP_ALLOWED_SENDERS. Restart the app after editing it.
+node --env-file=.env.local scripts/channel-sim.mjs whatsapp 254700000009 "Hi My Plug! I'd like to try it out."
+node --env-file=.env.local scripts/channel-sim.mjs whatsapp 254700000009 "a cat carrier for Mum"
+```
+
+### Connect a real number
+
+1. **Set the app's side** in `.env.local`, then restart the app:
+
+   ```bash
+   WHATSAPP_BRIDGE_SECRET=<openssl rand -hex 32>
+   WHATSAPP_BOT_NUMBER=2547XXXXXXXX     # the spare number, digits only
+   CHANNEL_OPEN_START=1                 # anyone who says "Hi My Plug!" gets in
+   ```
+
+2. **Run the connector.** Either build it (needs Go 1.25 and a C compiler, because the session is
+   stored in SQLite):
+
+   ```bash
+   cd connectors/whatsapp
+   make build
+   export WHATSAPP_BRIDGE_SECRET=<same value as the app>
+   export TS_BASE_URL=http://localhost:3000
+   export DATA_DIR=$PWD/data && mkdir -p data && chmod 700 data
+   export ADMIN_TOKEN=$(openssl rand -hex 24)
+   ./bin/connector
+   ```
+
+   Or run it in Docker:
+
+   ```bash
+   cd connectors/whatsapp && make docker
+   docker run -d --name dt-whatsapp \
+     -e WHATSAPP_BRIDGE_SECRET=<same value as the app> \
+     -e TS_BASE_URL=http://host.docker.internal:3000 -e ALLOW_INSECURE_TS_URL=1 \
+     -e ADMIN_TOKEN=$(openssl rand -hex 24) \
+     -v dt-whatsapp-data:/data dt-whatsapp-connector
+   ```
+
+3. **Pair the number.** In a second terminal (with the same `ADMIN_TOKEN` exported), or with
+   `docker exec dt-whatsapp` in front:
+
+   ```bash
+   connectors/whatsapp/bin/connector admin POST /pair '{"phone":"2547XXXXXXXX"}'
+   ```
+
+   It prints an 8-character code. On the spare phone go to WhatsApp → **Settings → Linked devices →
+   Link a device → Link with phone number instead**, then enter the code. To use a QR code instead, run
+   `admin POST /pair/qr`, then `admin GET /pair/qr`, and scan the code it prints.
+
+4. **Check it:** `admin GET /status` should show `"connected":true,"paired":true`. From another
+   phone, send *Hi My Plug! I'd like to try it out.* to the number. You'll get the intro, then a note
+   to save the number as My Plug.
+
+```mermaid
+flowchart LR
+  subgraph local["Your machine"]
+    APP["App<br>localhost:3000"]
+    CON["Connector<br>admin on 127.0.0.1:8091"]
+    DATA[("data/<br>session.db · connector.db")]
+  end
+  PHONE["Spare phone<br>(WhatsApp)"] -- "linked device" --- CON
+  CON -- "HMAC-signed HTTP" --> APP
+  CON --- DATA
+```
+
+The session lives in `DATA_DIR`, so restarts need no new pairing. Who can chat:
+
+- numbers in `WHATSAPP_ALLOWED_SENDERS`;
+- anyone who sends *Hi My Plug!* when `CHANNEL_OPEN_START=1`;
+- a payer who sends a `JOIN` code from an order page.
+
+Everyone else is ignored. More detail is in `connectors/whatsapp/README.md` and
+`docs/CHANNEL_CONTRACT.md`.
+
+### Add another channel
+
+1. Add an entry to `src/channel/registry.ts`: sender format, reply length, and whether it takes images.
+2. Set `CHANNEL_<ID>_SECRET` (32+ characters) and `CHANNEL_<ID>_ALLOWED`.
+3. Write a connector. It signs each request with `HMAC-SHA256(secret, ts \n METHOD \n path \n body)`
+   (headers `X-DT-Timestamp` and `X-DT-Signature`), posts to `.../inbound`, then claims replies from
+   `.../outbox/claim` and acknowledges each one at `.../outbox/{id}/ack`.
+
+## Deploy (Render)
+
+`render.yaml` describes the whole setup:
+
+- the app (Node web service, migrations as a pre-deploy step, `/api/health` check);
+- the WhatsApp connector (Docker worker with a 1 GB disk, reaching the app over Render's private
+  network);
+- Postgres 16;
+- the static website.
+
+It all costs about $20 a month on the smallest paid plans.
+
+1. Fork the repo. On Render, choose **New → Blueprint** and pick the fork.
+2. Fill in the variables marked `sync: false` (the keys from step 2 above).
+3. After the first deploy, open the connector's **Shell** and pair: `connector admin POST /pair '{"phone":"…"}'`.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, types, tests, a build and the connector
+checks. Render deploys only after they pass.
+
+## Checks
+
+```bash
+npm run lint
+npm run typecheck
+npm test                 # needs Postgres; uses a separate *_test database
+npm run test:e2e         # Playwright browser journey
+npm run live:providers   # real calls to the AI, Channel3 and PayPal (create only, no capture)
+cd connectors/whatsapp && make check
+```
 
 ## What is real and what is not
 
 | Part | State |
 |---|---|
-| Checkout | Real PayPal **Sandbox** order, approved by a sandbox buyer and captured by the server. No real money moves. |
-| AI | Real model calls (OpenRouter by default, Gemini through Google also supported) that read text and photos and propose requirements. The person confirms them; the model cannot choose, pay or change roles. |
-| Offers | A clearly labelled **demo seller** ("Whisker & Co (demo)") and Channel3 results (US/GB). An import is paid in one **sandbox** payment to a labelled concierge ("Dad's Typing concierge (sandbox)"): an operator would buy it through the forwarder. No real provider order is placed. |
-| Chat | A browser simulation. It is **not** WhatsApp. Text, photo upload and push-to-talk voice all feed the same engine. |
-| Connectors | The engine is channel-agnostic. A WhatsApp connector (Go, Whatsmeow, an unofficial client) is in `connectors/whatsapp`; it has been tested against the app with a fake transport only, not against real WhatsApp. SMS and others plug in the same way. |
-| Refunds | Operator-only, sandbox. There is no public refund control and no merchant UI: a signed local command (`scripts/operator-refund.mjs`, needs `OPERATOR_SECRET`) issues them. Buyers see refunded and pending amounts on the receipt, separate from the payment. |
-| Webhook | `POST /api/webhooks/paypal` is off unless `PAYPAL_WEBHOOK_ID` is set and a reachable HTTPS URL is registered on the sandbox app. Without it the app reconciles payments and refunds by polling PayPal. |
-| Kenya delivery | Cards with a delivered price in KSh, an arrival date range and a one-line difference, from a photo with no form. Weight and size come from Channel3 when listed (about a third of products) and otherwise from category priors plus a packaging model; freight uses each forwarder's published rule (Kentex read first-hand, Aquantuo second-hand); Kenya door delivery is our own labelled estimate. FX is the Central Bank of Kenya rate via Frankfurter, stored with date and source. Every figure is an **estimate, not a quote**; an incomplete total can never be "best delivered price". The payment is charged at the top of the range and the difference is refunded after weighing; above that needs the payer's yes. Destination comes from a saved profile, a WhatsApp pin (mapped offline, coordinates never stored) or one question. Quote screenshots are read by the AI into editable fields. |
-| Order updates | The engine writes each order step once as a notice; the browser shows it on the task page, WhatsApp sends it with the pickup pin and contact card, SMS as text with a map link. The payer joins on WhatsApp by sending a one-time `JOIN` code (that also admits their number); `STOP` ends it. Quiet hours 21:00 to 07:00 Nairobi. Env: `HUB_KENTEX_PIN`, `HUB_KENTEX_HOURS`, `HUB_KENTEX_PHONE`, `HUB_AQUANTUO_ADDRESS`, `HUB_AQUANTUO_HOURS`, `HUB_AQUANTUO_PHONE`, `HUB_AQUANTUO_PIN`, `WHATSAPP_BOT_NUMBER`. |
-| Shared links | Instagram, TikTok and Facebook posts (and YouTube/X as link-only) are recognised and kept on one task with **Open original**; the app never claims to have watched a video. Screenshot, description or the shopper's own short clip (sampled frames, deleted after) recover the item on the same task. Supadata Extract is built but **off**: it needs `SUPADATA_ENABLED=1`, `SUPADATA_API_KEY`, `SUPADATA_PLATFORMS`, `SUPADATA_URL_ALLOWLIST` and `SUPADATA_CREDIT_CEILING`. Short-link expansion needs `SOURCE_RESOLVE_SHORT_LINKS=1`. |
-| Not verified | A real phone gallery/camera pick, a real microphone on a phone, Kenyan-accented or Kiswahili speech, a delivered PayPal webhook, real WhatsApp (including pins and contact cards), any real shared-link analysis (Supadata pilot not run), sandbox buyer approval of a concierge order, any real provider quote, order, reweigh or tracking feed, the packaging model against real invoices, and Kenyan public holidays in arrival dates. |
-
-## Run it locally
-
-Prerequisites: Node 22+, npm, Docker (for Postgres).
-
-```bash
-npm install
-cp .env.example .env.local        # then fill in the values below
-docker run -d --name dads-typing-pg -p 127.0.0.1:5433:5432 \
-  -e POSTGRES_USER=dt -e POSTGRES_PASSWORD=<choose> -e POSTGRES_DB=dads_typing \
-  postgres:16-alpine
-# set DATABASE_URL=postgres://dt:<choose>@127.0.0.1:5433/dads_typing
-npm run db:migrate
-npm run build && npm start        # http://localhost:3000
-```
-
-Environment variables (names only; see `.env.example`):
-
-- `PAYPAL_ENV=sandbox`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_MERCHANT_ID`
-  (the Business sandbox account's merchant id), optional `PAYPAL_WEBHOOK_ID`.
-- One AI provider: `GEMINI_API_KEY` + `GEMINI_MODEL`, or `INTERPRETER_PROVIDER=openrouter`
-  with `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`.
-- `CHANNEL3_API_KEY` (optional; without it only demo offers appear).
-- `APP_BASE_URL` (PayPal returns here), `DATABASE_URL`, `TRUST_PROXY=1` only behind a trusted proxy.
-
-The server refuses to start PayPal unless `PAYPAL_ENV=sandbox`.
-
-## Try the journey (judge path)
-
-1. Open `/`. Choose **Upload photo** and pick a photo of a cat carrier. No photo handy? Use
-   **Download a sample photo** on the same screen (a synthetic drawing). Optionally add a note such
-   as "For Mum. It must open from the top and be at least 45 cm long", then **Start with this photo**.
-   You can also type a request and choose **Start for me** (or **Start for Mum** to send her a link to choose), or speak it with **Speak**.
-2. The assistant reads the photo and note and proposes requirements, each with the words it relied on.
-   Nothing is applied until a person confirms it. The page moves through **Find · Choose · Pay · Track**.
-3. Open **Share** and choose **Send to Mum to choose**, then open the link in a **different browser
-   profile** (a private window shares no sign-in). As Mum, confirm a requirement such as "it must open
-   from the top": the shortlist changes, mismatches move to **Doesn't match**, and offers that can't be
-   checked move to **Similar**.
-4. Mum taps **Choose this one**. The payer's page moves to **Pay** and shows the exact item, seller,
-   quantity and total; nothing is created until **Pay with PayPal (sandbox)** is tapped. Sign in with a
-   PayPal **Personal sandbox** buyer (create one under Testing Tools > Sandbox Accounts in the PayPal
-   developer dashboard).
-5. The server captures and verifies the payment; both views show the same receipt.
-
-Cancelling at PayPal leaves no receipt and the payment can be retried.
-
-## Connectors (any channel)
-
-The engine does not know about WhatsApp, SMS or any other channel. A connector is a small
-transport that posts inbound messages to the engine and sends the replies the engine queues,
-over a signed HTTP bridge (`/api/channel/{channel}/...`).
-
-To add a channel:
-
-1. Add one entry to `src/channel/registry.ts` (sender id format, reply length, images or not).
-2. Set `CHANNEL_<ID>_SECRET` (32+ characters) and `CHANNEL_<ID>_ALLOWED` (sender ids that may
-   use it; empty means nobody) in the environment. Each channel has its own secret.
-3. Write the connector: sign each request with `HMAC-SHA256(secret, ts \n METHOD \n path \n body)`
-   (headers `X-DT-Timestamp`, `X-DT-Signature`), `POST .../inbound`, then `POST .../outbox/claim`
-   and `POST .../outbox/{id}/ack`. An ack of `unknown` means "may have been delivered" and is never resent.
-
-Try any channel without a real connector:
-
-```bash
-node --env-file=.env.local scripts/channel-sim.mjs sms 254700000009 "a cat carrier for Mum"
-```
-
-`connectors/whatsapp` is a WhatsApp connector (Go, Whatsmeow, an unofficial client; see its README
-for the risks and for pairing). The browser chat is the built-in connector. The browser path keeps
-working when any connector is down.
-
-## Voice
-
-Push-to-talk on the chat: press Speak, talk for up to 20 seconds, Stop or Cancel, then check and edit the transcript before using it. Nothing is sent automatically and a transcript never authorises payment or any other action; you still press Send.
-
-- Audio goes to the server route `POST /api/tasks/:id/transcribe` (message permission, rate limited, max 2.5 MB; webm, ogg or mp4 only) and on to the speech-to-text model set by `STT_MODEL` via OpenRouter. The server does not keep the audio.
-- Needs HTTPS or localhost for microphone access and a browser with MediaRecorder. If voice is unavailable the text box works as before.
-- Read aloud uses the browser speech synthesis where present; the full text always stays on screen.
-- Checked so far: Chrome (desktop) recording and transcription with a synthetic audio source. Safari/iOS, Firefox and real microphone speech are not yet tested.
-
-## Checks
-
-```bash
-npm run typecheck   # next typegen + tsc
-npm run lint
-npm test            # deterministic tests against a separate *_test database
-npm run live:providers   # real calls: AI, Channel3, PayPal create-order (no capture)
-```
-
-Deterministic tests use mocks and a local database; they are separate from the live
-provider checks and from a real Sandbox checkout.
+| Checkout | A real PayPal **Sandbox** order, approved by a sandbox buyer and captured by the server. No real money moves. |
+| AI | Real model calls that read text, photos, voice and clips and propose requirements. People confirm them; the model can't choose, pay or change roles. |
+| Offers | A labelled demo seller ("Whisker & Co (demo)") plus Channel3 results from US and UK shops. Imports are paid in one sandbox payment to a labelled concierge; no real order is placed. |
+| Kenya delivery | Delivered prices in KSh with an arrival range, from each forwarder's published rules and the Central Bank of Kenya rate. Every figure is an **estimate, not a quote**. |
+| WhatsApp | Runs on Render as My Plug. Tested end to end with a simulated transport; testing on the real number is under way. |
+| Shared links | Instagram, TikTok and Facebook links are recognised and kept with **Open original**. Video analysis (Supadata) is built but off. |
+| Refunds | Operator-only and sandbox, through a signed command (`scripts/operator-refund.mjs`). |
+| Webhook | `POST /api/webhooks/paypal` is off unless `PAYPAL_WEBHOOK_ID` is set. Without it, the app checks PayPal on a schedule. |
 
 ## Design notes
 
-- Money is integer minor units; the server computes totals and freezes the approved offer.
-- An order is marked paid only from a COMPLETED capture whose order, merchant, amount and
-  currency match the frozen order. Redirects and approvals alone prove nothing.
-- Access is a scoped, expiring, revocable grant checked on every request. Links carry the
-  grant in the URL fragment, which browsers do not send to the server.
-- A scheduled reconciler resolves payments whose capture response was lost.
+- Money is stored as integer minor units. The server computes totals and freezes the approved offer.
+- An order is marked paid only by a completed capture whose order, merchant, amount and currency
+  match the frozen order.
+- Access is a scoped, expiring, revocable grant checked on every request. Links carry it in the URL
+  fragment, which browsers never send to the server.
+- No full addresses in chats, links, logs or model prompts. Location pins are mapped to a county and
+  the coordinates are not kept.
 
 ## Data attribution
 
-Kenya county boundaries in `src/delivery/data/ke-counties.json`: © OpenStreetMap contributors, available under the Open Database Licence (ODbL 1.0), https://www.openstreetmap.org/copyright. Simplified for offline use; location pins are mapped to a county on our server and the coordinates are not stored.
+Kenya county boundaries in `src/delivery/data/ke-counties.json`: © OpenStreetMap contributors,
+under the Open Database Licence (ODbL 1.0), https://www.openstreetmap.org/copyright.
 
 ## Licence
 
