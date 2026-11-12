@@ -195,23 +195,16 @@ export function composeReply(o: { reply: string; extra?: string[]; proposals: { 
 
 const link = (taskId: string, token: string) => `${process.env.APP_BASE_URL ?? "http://localhost:3000"}/t/${taskId}#k=${token}`;
 
-// An image starts a new task; text continues the latest open one, else starts one
-// A photo continues the latest task only when it is the screenshot that task
-// asked for (a shared link it could not read, nothing chosen or paid yet)
-async function awaitingScreenshot(taskId: string) {
-  return !!(await tx((c) => c.query(
-    `SELECT 1 FROM shared_sources s WHERE s.task_id=$1 AND s.status IN ('preview_only','needs_input','unavailable','retryable_error','unsupported')
-       AND s.created_at > now() - interval '1 day'
-       AND NOT EXISTS (SELECT 1 FROM product_candidates k WHERE k.task_id=s.task_id AND k.status='chosen')
-       AND NOT EXISTS (SELECT 1 FROM seller_orders o WHERE o.task_id=s.task_id)`, [taskId]))).rowCount;
-}
+// Text and photos continue the latest open request, so a forwarded run of
+// messages (what, a label photo, a budget) stays one search. A new shared post,
+// NEW, or a paid or cancelled order starts the next one.
 
-async function resolveTask(channel: string, row: Row, hasImage: boolean) {
+async function resolveTask(channel: string, row: Row) {
   const hash = senderHash(channel, row.sender as string);
   // A new shared post is a new thing to buy, like a new photo
   const newLink = findLinks((row.body as string) ?? "").some((f) => f.type === "social");
   const latest = (await tx((c) => c.query(`SELECT task_id, grant_id FROM channel_identities WHERE channel=$1 AND sender_hash=$2`, [channel, hash]))).rows[0];
-  const existing = newLink ? undefined : !hasImage ? latest : latest && (await awaitingScreenshot(latest.task_id)) ? latest : undefined;
+  const existing = newLink ? undefined : latest;
   if (existing) {
     const token = deriveChannelToken(channel, existing.grant_id);
     const v = await getTaskView(existing.task_id, token).catch(() => null);
@@ -353,7 +346,46 @@ async function optionsBlock(channel: string, hash: string, taskId: string, token
     [taskId, channel, hash, cards.map((x) => x.offerId)]));
   const door = d.input.handling === "door";
   const head = !door ? "To collect in Nairobi, all costs in:" : d.destination?.confirmed ? `Delivered to ${placeLabel(d.destination)}:` : "Delivered to Kenya:";
-  return renderOptions(cards, head, compact);
+  const budget = Number(d.input.budgetKesMinor ?? 0) / 100 || undefined;
+  return renderOptions(cards, head, compact, budget);
+}
+
+// "around KSh 3,000", "budget 3k", "3,000 bob": a KES amount the shopper set,
+// kept as whole shillings; it marks options, it never hides them
+export function budgetFrom(text: string): number | null {
+  const t = text.replace(/,(?=\d{3}\b)/g, "");
+  const m = /\b(?:ksh|kes|sh)\.?\s*(\d+(?:\.\d+)?)\s*(k)?\b/i.exec(t)
+    ?? /\b(\d+(?:\.\d+)?)\s*(k)?\s*(?:ksh|kes|bob|shillings?)\b/i.exec(t)
+    ?? /\bbudget\b[^\d]{0,20}(\d+(?:\.\d+)?)\s*(k)?\b/i.exec(t);
+  if (!m) return null;
+  const n = Math.round(Number(m[1]) * (m[2] ? 1000 : 1));
+  return n >= 50 && n <= 10_000_000 ? n : null;
+}
+
+async function saveBudget(taskId: string, kes: number) {
+  await tx((c) => c.query(
+    `INSERT INTO delivery_plans (task_id,budget_kes_minor,budget_includes_delivery) VALUES ($1,$2,true)
+     ON CONFLICT (task_id) DO UPDATE SET budget_kes_minor=EXCLUDED.budget_kes_minor, budget_includes_delivery=true, updated_at=now()`,
+    [taskId, kes * 100]));
+}
+
+const NEW_CMD = /^\s*(new|restart|start over|new search)\s*[.!]*\s*$/i;
+const END_CMD = /^\s*(done|end|finish|close|end chat)\s*[.!]*\s*$/i;
+export const NEW_REPLY = "Okay, starting fresh. What are you looking for? Send a photo, a link or a few words.";
+const ended = (link?: string) =>
+  `Okay, that search is closed.${link ? ` It's still here if you need it: ${link}` : ""}\n\nWhen you want something else, just send a photo or a few words.`;
+
+// NEW starts the next search; DONE closes this one. Either way the old task
+// keeps its link, and order updates for anything paid carry on.
+async function handleRestart(channel: string, row: Row): Promise<string | null> {
+  const text = (row.body as string) || "";
+  const fresh = NEW_CMD.test(text), end = !fresh && END_CMD.test(text);
+  if (row.image_b64 || (!fresh && !end)) return null;
+  const hash = senderHash(channel, row.sender as string);
+  const task = await openTask(channel, hash);
+  await tx((c) => c.query(`DELETE FROM channel_identities WHERE channel=$1 AND sender_hash=$2`, [channel, hash]));
+  if (fresh) return NEW_REPLY;
+  return task ? ended(link(task.taskId, task.token)) : "There's no open search right now. Send a photo or a few words to start one.";
 }
 
 const UNOPENED = "I couldn't open that photo or attachment here, so I haven't used it. Send a screenshot or tell me what you're looking for.";
@@ -387,8 +419,14 @@ async function processRow(channel: string, row: Row) {
     const task = await openTask(channel, senderHash(channel, row.sender as string));
     return finish(channel, row, task ? `${UNOPENED}\n\nYour task: ${link(task.taskId, task.token)}` : UNOPENED);
   }
+  const restart = await handleRestart(channel, row);
+  if (restart) return finish(channel, row, restart);
   const ask = await afterFinished(channel, row);
   if (ask) return finish(channel, row, ask);
+  // Saved first, whichever handler answers the message
+  const budget = budgetFrom((row.body as string) || "");
+  const open = budget ? await openTask(channel, senderHash(channel, row.sender as string)) : null;
+  if (budget && open) await saveBudget(open.taskId, budget);
   const contact = await handleContact(channel, row);
   if (contact) return finish(channel, row, contact);
   const answered = await handleDestination(channel, row);
@@ -396,7 +434,8 @@ async function processRow(channel: string, row: Row) {
   const chosen = await handleChoice(channel, row);
   if (chosen) return finish(channel, row, chosen);
   const image = row.image_b64 ? { mime: row.image_mime as string, base64: row.image_b64 as string } : undefined;
-  const { taskId, token, fresh, dest } = await resolveTask(channel, row, !!image);
+  const { taskId, token, fresh, dest } = await resolveTask(channel, row);
+  if (budget && !open) await saveBudget(taskId, budget);
   const hash = senderHash(channel, row.sender as string);
   // Someone who opted out gets replies to what they send, but no order updates until they JOIN again
   await tx(async (c) => { if (!(await optedOut(c, channel, hash))) await subscribe(c, taskId, channel, hash, row.sender as string, true); });

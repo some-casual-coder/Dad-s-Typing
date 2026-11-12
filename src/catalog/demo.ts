@@ -3,7 +3,8 @@ import { recordOffers } from "@/domain/tasks";
 import { getDiscovery } from "@/adapters";
 import { AdapterError } from "@/adapters/types";
 
-// SYNTHETIC catalogue for sandbox demos. Not a real seller or real stock.
+// SYNTHETIC catalogue for sandbox demos and tests. Not a real seller or real
+// stock, so it is off unless DEMO_CATALOGUE=1: real requests see real results.
 export const DEMO_SELLER = "Whisker & Co (demo)";
 const SPEC = "demo spec sheet";
 
@@ -18,7 +19,10 @@ export const DEMO_SKUS: Sku[] = [
   { sku: "WC-TOP-60", title: "Whisker & Co Skylift XL top-opening carrier 60 cm", opening: "top", lengthCm: 60, priceMinor: 7900, shippingMinor: 1000, stock: "OutOfStock" },
 ];
 
+export const demoCatalogueOn = (env = process.env) => env.DEMO_CATALOGUE === "1";
+
 export async function seedDemoOffers(taskId: string, merchantId = process.env.PAYPAL_MERCHANT_ID) {
+  if (!demoCatalogueOn()) return;
   if (!merchantId) throw new Error("PAYPAL_MERCHANT_ID is not set");
   await recordOffers(taskId, DEMO_SKUS.map((s) => {
     const attributes: Record<string, Attribute> = { internal_length_cm: { value: s.lengthCm, unit: "cm", source: SPEC } };

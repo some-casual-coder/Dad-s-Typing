@@ -34,7 +34,8 @@ export function optionLabels(titles: string[], n: number): string[] {
   });
 }
 
-export function renderOptions(cards: Card[], head: string, compact: boolean): string {
+// With a budget, each option says whether it fits, and the list says so when none does
+export function renderOptions(cards: Card[], head: string, compact: boolean, budgetKes?: number): string {
   if (!cards.length) return "";
   const names = optionLabels(cards.map((c) => c.title), compact ? 28 : 48);
   const lines = cards.map((c, i) => {
@@ -42,8 +43,11 @@ export function renderOptions(cards: Card[], head: string, compact: boolean): st
     const date = c.arrival ? `, arrives ${shortDates(c.arrival)}` : "";
     const note = compact ? "" : ` ${c.winner ? "Best delivered price." : c.difference}`;
     const demo = c.provider === "demo" ? " (demo seller)" : "";
-    return `${i + 1}) ${names[i]}${demo}: ${price}${date}.${note}`;
+    const fit = budgetKes && c.underBudget === "yes" ? " Within your budget." : budgetKes && c.underBudget === "no" ? " Over your budget." : "";
+    return `${i + 1}) ${names[i]}${demo}: ${price}${date}.${note}${fit}`;
   });
+  if (budgetKes && !cards.some((c) => c.underBudget === "yes"))
+    head = `Nothing I found fits KSh ${budgetKes.toLocaleString("en-KE")} once delivery to Kenya is added. The closest:\n${head}`;
   const pick = cards.length === 1 ? "Reply 1 to choose it." : `Reply ${cards.map((_, i) => i + 1).join(", ").replace(/, (\d)$/, " or $1")} to choose.`;
   return [head, ...lines, pick].join("\n");
 }

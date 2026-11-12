@@ -8,6 +8,7 @@ export interface Card {
   planId: string; offerId: string; title: string; seller: string; imageUrl: string | null;
   price: string | null; arrival: string | null; difference: string; method: string; provider: string;
   confidence: Plan["confidence"]; complete: boolean; winner: boolean; closest: boolean; quoteRequired: boolean;
+  underBudget: Plan["underBudget"];
   // Other ways to get the same listing, for "other ways"
   others: string[];
 }
@@ -70,7 +71,7 @@ export function present(plans: Plan[], cheapestId: string | null): Cards {
     planId: p.id, offerId: p.offerId, title: p.item.title, seller: p.item.seller, imageUrl: p.item.imageUrl,
     price: p.complete ? priceText(p.kes) : null, arrival: p.eta ? formatRange(p.eta.earliest, p.eta.latest) : null,
     difference: difference(p, ref), method: p.title, provider: p.provider, confidence: p.confidence, complete: p.complete,
-    winner: p.id === cheapestId, closest: p.exact, quoteRequired: p.availability === "needs_quote",
+    winner: p.id === cheapestId, closest: p.exact, quoteRequired: p.availability === "needs_quote", underBudget: p.underBudget,
     others: (byOffer.get(p.offerId) ?? []).filter((x) => x.id !== p.id && x.availability === "available").map((x) => x.id),
   });
   const shownC = closest.slice(0, MAX_SHOWN), shownS = similar.slice(0, MAX_SHOWN);

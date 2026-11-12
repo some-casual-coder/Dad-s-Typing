@@ -175,15 +175,20 @@ describe("a forwarded photo", () => {
     expect(await count("SELECT count(*)::int n FROM messages WHERE channel='whatsapp' AND task_id IN (SELECT task_id FROM channel_inbox)")).toBe(1);
   });
 
-  it("text continues the open task; a new photo starts another; senders stay separate", async () => {
+  it("text and photos continue the open task; NEW starts another; senders stay separate", async () => {
     await signed(inbound, IN, msg({ image: IMG }));
     await processInboxOnce();
     await signed(inbound, IN, msg({ text: "it must open from the top" }));
     await processInboxOnce();
-    expect(await count("SELECT count(DISTINCT task_id)::int n FROM channel_inbox")).toBe(1);
+    // A forwarded label photo belongs to the same request
     await signed(inbound, IN, msg({ image: IMG }));
     await processInboxOnce();
-    expect(await count("SELECT count(DISTINCT task_id)::int n FROM channel_inbox")).toBe(2);
+    expect(await count("SELECT count(DISTINCT task_id)::int n FROM channel_inbox")).toBe(1);
+    await signed(inbound, IN, msg({ text: "NEW" }));
+    await processInboxOnce();
+    await signed(inbound, IN, msg({ image: IMG }));
+    await processInboxOnce();
+    expect(await count("SELECT count(DISTINCT task_id)::int n FROM channel_inbox WHERE task_id IS NOT NULL")).toBe(2);
     await signed(inbound, IN, msg({ sender: "254700000002", text: "hello" }));
     await processInboxOnce();
     expect(await count("SELECT count(DISTINCT task_id)::int n FROM channel_inbox")).toBe(3);
@@ -425,7 +430,8 @@ describe("destination from the sender", () => {
     await send({ text: "Westlands" });
     expect((await outbox()).at(-1)).toMatch(/^Delivering to your door in Westlands, Nairobi/);
     expect(interpret).toHaveBeenCalledTimes(1);
-    // A new photo starts a new task: the saved place is used, no question
+    // A new search: the saved place is used, no question
+    await send({ text: "new" });
     await send({ image: IMG });
     const last = (await outbox()).at(-1)!;
     expect(last).not.toMatch(/Reply YES/);
@@ -622,5 +628,51 @@ describe("shared links through the WhatsApp simulator (R01, R03, R06)", () => {
     await send({ text: REEL, sender: "254700000002" });
     expect(await taskOf("254700000002")).not.toBe(await taskOf());
     expect((await pool.query(`SELECT count(*)::int n FROM shared_sources WHERE identity='instagram:C9abcDEF123' AND task_id IN ($1,$2)`, [await taskOf(), await taskOf("254700000002")])).rows[0].n).toBe(2);
+  });
+});
+
+describe("forwarded requests: budget, NEW and DONE", () => {
+  it("reads a budget from plain chat", async () => {
+    const { budgetFrom } = await import("@/channel/inbox");
+    expect(budgetFrom("Around KSh 3,000. Don't get me something expensive.")).toBe(3000);
+    expect(budgetFrom("budget is 3k")).toBe(3000);
+    expect(budgetFrom("not more than 2,500 bob")).toBe(2500);
+    expect(budgetFrom("kes 15000")).toBe(15000);
+    expect(budgetFrom("It's a Lenovo G50-30, 20V 2.25A")).toBeNull();
+  });
+
+  it("a budget in chat is saved on the open request", async () => {
+    await signed(inbound, IN, msg({ text: "a laptop charger for Mum" }));
+    await processInboxOnce();
+    await signed(inbound, IN, msg({ text: "Around KSh 3,000." }));
+    await processInboxOnce();
+    expect(await count(`SELECT d.budget_kes_minor::int n FROM delivery_plans d JOIN channel_identities i ON i.task_id=d.task_id`)).toBe(300000);
+  });
+
+  it("DONE closes the search with its link; NEW asks what is next", async () => {
+    await signed(inbound, IN, msg({ text: "a laptop charger" }));
+    await processInboxOnce();
+    await signed(inbound, IN, msg({ text: "done" }));
+    await processInboxOnce();
+    const out = async () => (await pool.query(`SELECT body FROM channel_outbox ORDER BY created_at`)).rows.map((r) => r.body as string);
+    expect((await out()).at(-1)).toMatch(/^Okay, that search is closed\. It's still here if you need it: http/);
+    expect(await count("SELECT count(*)::int n FROM channel_identities")).toBe(0);
+    await signed(inbound, IN, msg({ text: "Done" }));
+    await processInboxOnce();
+    expect((await out()).at(-1)).toMatch(/^There's no open search right now/);
+    const { NEW_REPLY } = await import("@/channel/inbox");
+    await signed(inbound, IN, msg({ text: "New search" }));
+    await processInboxOnce();
+    expect((await out()).at(-1)).toBe(NEW_REPLY);
+  });
+});
+
+describe("search refinement", () => {
+  it("searches again only when a later message names the item more exactly", async () => {
+    const { sharper } = await import("@/chat/exchange");
+    expect(sharper("lenovo laptop charger", "Lenovo G50-30 laptop charger 20V")).toBe(true);
+    expect(sharper("lenovo laptop charger", "Lenovo charger")).toBe(false);
+    expect(sharper("lenovo laptop charger", "laptop charger Lenovo")).toBe(false);
+    expect(sharper(null, "anything")).toBe(false);
   });
 });
