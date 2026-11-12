@@ -234,7 +234,12 @@ The session lives in `DATA_DIR`, so restarts need no new pairing. Who can chat:
 - anyone who sends *Hi My Plug!* when `CHANNEL_OPEN_START=1`;
 - a payer who sends a `JOIN` code from an order page.
 
-Everyone else is ignored. More detail is in `connectors/whatsapp/README.md` and
+Everyone else is ignored. My Plug is never added to group chats, for privacy: it only reads
+what someone chooses to send it. To get help with a family chat, forward the messages to it one
+after another (what's needed, a label photo, a budget such as "around KSh 3,000") and it treats
+them as one request. Send **NEW** to start a new search, or **DONE** to close the current one.
+
+More detail is in `connectors/whatsapp/README.md` and
 `docs/CHANNEL_CONTRACT.md`.
 
 ### Add another channel
@@ -281,7 +286,7 @@ cd connectors/whatsapp && make check
 |---|---|
 | Checkout | A real PayPal **Sandbox** order, approved by a sandbox buyer and captured by the server. No real money moves. |
 | AI | Real model calls that read text, photos, voice and clips and propose requirements. People confirm them; the model can't choose, pay or change roles. |
-| Offers | A labelled demo seller ("Whisker & Co (demo)") plus Channel3 results from US and UK shops. Imports are paid in one sandbox payment to a labelled concierge; no real order is placed. |
+| Offers | Channel3 results from US and UK shops. A synthetic demo seller ("Whisker & Co (demo)", cat carriers) appears only with `DEMO_CATALOGUE=1`, for tests. Imports are paid in one sandbox payment to a labelled concierge; no real order is placed. |
 | Kenya delivery | Delivered prices in KSh with an arrival range, from each forwarder's published rules and the Central Bank of Kenya rate. Every figure is an **estimate, not a quote**. |
 | WhatsApp | Runs on Render as My Plug. Tested end to end with a simulated transport; testing on the real number is under way. |
 | Shared links | Instagram, TikTok and Facebook links are recognised and kept with **Open original**. Video analysis (Supadata) is built but off. |
