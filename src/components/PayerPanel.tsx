@@ -62,6 +62,18 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
       <p className="small">From {concierge ? "Dad's Typing concierge (sandbox)" : order?.seller ?? q?.seller ?? sel.seller} · Quantity 1</p>
       {concierge && <p className="small">We buy it through {(c?.provider ?? q?.provider) === "aquantuo" ? "Aquantuo" : "Kentex"} and deliver it to you in Kenya.</p>}
       {arrival && <p>Arrives {arrival} <span className="muted small">(estimate)</span></p>}
+      {lines && lines.length > 0 && (
+        <div className="checkout">
+          <p className="checkout-h">Costs</p>
+          <dl className="costs">{lines.map((l, i) => (
+            <div key={i} className="cost">
+              <dt>{l.label}</dt>
+              <dd>{l.status === "included" ? "Included" : l.minor !== null
+                ? `${formatMoney(l.minor, l.currency)}${l.highMinor && l.highMinor !== l.minor ? ` to ${formatMoney(l.highMinor, l.currency)}` : ""}` : "To confirm"}</dd>
+            </div>
+          ))}</dl>
+        </div>
+      )}
       {total ? (
         <>
           <p className="price">{concierge ? "Up to " : "Total today: "}{formatMoney(total.minor, total.currency)}</p>
@@ -84,14 +96,6 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
             }}>Review the new price</button>
           )}
         </div>
-      )}
-      {lines && (
-        <details className="more"><summary>What this covers</summary>
-          <ul className="parts small">{lines.map((l, i) => (
-            <li key={i}>{l.label}{l.status === "included" ? ": included" : l.minor !== null
-              ? `: ${formatMoney(l.minor, l.currency)}${l.highMinor && l.highMinor !== l.minor ? ` to ${formatMoney(l.highMinor, l.currency)}` : ""}` : ""}</li>
-          ))}</ul>
-        </details>
       )}
       <p className="small"><strong>{concierge ? "Sandbox demonstration: no real order or shipment is booked." : "Sandbox: demo shop, no real money moves."}</strong> PayPal charges in US dollars.</p>
       {total && !p?.changed && (!order || order.status === "awaiting_payer" || order.status === "failed") && (

@@ -133,3 +133,12 @@ details { min-width: 0; }
 .musthave { padding: 0 2px; }
 details.card > summary { cursor: pointer; min-height: 44px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 700; }
 .chatbar .last { font-weight: 400; color: var(--muted); font-size: .9rem; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Checkout: every cost on its own line, like a receipt */
+.checkout { background: var(--accent-2); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; display: grid; gap: 6px; }
+.checkout-h { font-size: .72rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.costs { margin: 0; display: grid; }
+.cost { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: .92rem; }
+.cost:last-child { border-bottom: 0; }
+.cost dt { color: var(--ink); min-width: 0; }
+.cost dd { margin: 0; font-weight: 600; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
