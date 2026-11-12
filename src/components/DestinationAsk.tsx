@@ -3,7 +3,8 @@ import { useState } from "react";
 import { api, ApiError } from "@/lib/api";
 
 type Dest = { county: string; area: string; confirmed: boolean } | null;
-const label = (d: { county: string; area: string }) => (d.area && d.area !== d.county ? `${d.area}, ${d.county}` : d.county);
+const label = (d: { county: string; area: string }) =>
+  !d.area || d.area === d.county ? d.county : d.area.includes(d.county) ? d.area : `${d.area}, ${d.county}`;
 
 // One question with a default; once answered it becomes a quiet "Change" link
 export default function DestinationAsk({ taskId, token, dest, canEdit, onChanged }:

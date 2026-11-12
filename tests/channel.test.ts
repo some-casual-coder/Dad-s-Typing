@@ -16,17 +16,19 @@ const SECRETS: Record<string, string> = { whatsapp: SECRET, sms: SMS_SECRET, ema
 process.env.APP_BASE_URL = "https://app.test";
 
 const interpret = vi.fn();
+const hooks = vi.hoisted(() => ({ external: null as null | ((taskId: string) => Promise<void>) }));
 vi.mock("@/adapters", async () => ({
   getInterpreter: () => ({ interpret }),
   getPayments: () => ({}),
   getDiscovery: () => ({ search: async () => [] }),
+  getFx: () => ({ kesRate: async () => ({ rate: 130, date: "2026-11-11", source: "test rate" }) }),
 }));
 vi.mock("@/catalog/demo", async () => ({
   seedDemoOffers: async (taskId: string) => {
     const { recordOffers } = await import("@/domain/tasks");
     await recordOffers(taskId, [{ source: "demo", sourceOfferId: "TOP-1", route: "paypal", seller: "Demo", merchantId: "M1", sku: "TOP-1", title: "Carrier", unitPriceMinor: 3599, shippingMinor: 800, currency: "USD", availability: "InStock" }]);
   },
-  seedExternalOffers: async () => {},
+  seedExternalOffers: async (taskId: string) => { await hooks.external?.(taskId); },
 }));
 
 import { POST as inbound } from "@/app/api/channel/[channel]/inbound/route";
@@ -61,7 +63,7 @@ const IN = "/api/channel/whatsapp/inbound";
 
 beforeEach(async () => {
   interpret.mockReset().mockResolvedValue({ observations: [], proposedRequirements: [{ key: "opening", op: "eq", value: "top", essential: true, quote: "x" }], clarification: null, reply: "Got it, a cat carrier." });
-  await pool.query("TRUNCATE channel_outbox, channel_inbox, channel_identities, channel_status, sender_profiles");
+  await pool.query("TRUNCATE channel_outbox, channel_inbox, channel_identities, channel_status, sender_profiles, channel_menus, channel_subscriptions");
 });
 
 const count = async (sql: string, args: unknown[] = []) => (await pool.query(sql, args)).rows[0].n as number;
@@ -149,7 +151,7 @@ describe("a forwarded photo", () => {
     expect(out.recipient).toBe("254700000001");
     const [, taskId, token] = /https:\/\/app\.test\/t\/([0-9a-f-]{36})#k=([A-Za-z0-9_-]+)/.exec(out.body)!;
     const view = await getTaskView(taskId, token);
-    expect(view.viewer.roles).toEqual(["helper", "payer"]);
+    expect(view.viewer.roles).toEqual(["requester", "chooser", "helper", "payer"]);
     expect(out.body).toContain("opening eq top");
     expect(await count("SELECT count(*)::int n FROM channel_inbox WHERE image_b64 IS NOT NULL")).toBe(0);
     expect(await count("SELECT count(*)::int n FROM offers WHERE task_id=$1", [taskId])).toBeGreaterThan(0);
@@ -447,5 +449,65 @@ describe("destination from the sender", () => {
     await send({ text: undefined, location: { lat: 51.5, lon: -0.12 } });
     expect((await outbox()).at(-1)).toMatch(/outside Kenya/);
     expect((await signed(inbound, IN, msg({ text: undefined, location: { lat: "x", lon: 1 } }))).status).toBe(422);
+  });
+});
+
+describe("the whole journey in chat", () => {
+  const outbox = async () => (await pool.query(`SELECT body FROM channel_outbox WHERE recipient='254700000001' ORDER BY created_at`)).rows.map((r) => r.body as string);
+  const send = async (o: Record<string, unknown>) => {
+    expect((await signed(inbound, IN, msg(o))).status).toBe(202);
+    await processInboxOnce("whatsapp");
+    return (await outbox()).at(-1)!;
+  };
+
+  it("photo, numbered options, a number, one payment, then plain status pushes", async () => {
+    process.env.PAYPAL_MERCHANT_ID = "MERCH1";
+    hooks.external = async (taskId) => {
+      const { recordOffers } = await import("@/domain/tasks");
+      await recordOffers(taskId, [{ source: "channel3", sourceOfferId: `C-${Date.now()}`, route: "external", seller: "amazon.com", title: "Sherpa cat carrier",
+        unitPriceMinor: 3000, currency: "USD", availability: "InStock", url: "https://www.amazon.com/dp/B012345678",
+        specs: { weightGrams: 1200, lengthMm: 450, widthMm: 300, heightMm: 280 } }]);
+    };
+    try {
+      const first = await send({ image: IMG });
+      expect(first).toMatch(/Delivered to Kenya:\n1\) /);
+      expect(first).toMatch(/Reply 1 or 2 to choose\./);
+      expect(first).toMatch(/Deliver to Nairobi\? Reply YES/);
+      await send({ text: "Westlands" });
+      const pick = /(\d)\) Sherpa cat carrier/.exec(first)![1];
+      const chosen = await send({ text: pick });
+      expect(chosen).toMatch(/^You chose Sherpa cat carrier\.\nOne payment of up to USD [\d.]+ \(about KSh [\d,]+\) covers/);
+      expect(chosen).toMatch(/Arrives about .*\nPay securely here: https:\/\/app\.test\/t\//);
+
+      // Same engine state the browser sees, through the channel's own grant
+      const hash = senderHash("whatsapp", "254700000001");
+      const id = (await pool.query(`SELECT task_id, grant_id FROM channel_identities WHERE sender_hash=$1`, [hash])).rows[0];
+      const token = deriveChannelToken("whatsapp", id.grant_id);
+      const view = await getTaskView(id.task_id, token);
+      expect(view.selection!.title).toBe("Sherpa cat carrier");
+      expect(view.order!.kind).toBe("concierge");
+
+      const { beginAttempt, recordProviderOrder, settleCapture } = await import("@/domain/payments");
+      const att = await beginAttempt(id.task_id, token, view.order!.id);
+      await recordProviderOrder(att.id, "PP-CHAT-1");
+      await settleCapture(att.id, { paypalOrderId: "PP-CHAT-1", captureId: "CAPCHAT00001", status: "COMPLETED", amountMinor: view.order!.totalMinor, currency: "USD", payeeMerchantId: "MERCH1" });
+      expect((await outbox()).at(-1)).toMatch(/^Paid\. Arrives about \d+/);
+      const { recordFulfilment } = await import("@/domain/concierge");
+      await recordFulfilment({} as never, { orderId: view.order!.id, status: "ordered", source: "operator", key: "chat-ordered-1" });
+      expect((await outbox()).at(-1)).toBe("Ordered from the store.");
+    } finally { hooks.external = null; }
+  });
+
+  it("a bad number is answered with the link, and a contact card yields a payer-only link", async () => {
+    await send({ image: IMG });
+    expect(await send({ text: "7" })).toMatch(/^Please reply with a number from the list/);
+    const r = await send({ text: undefined, contact: { name: "Dad <script>" } });
+    expect(r).toMatch(/^Forward this link to Dad script so they can review and pay/);
+    const tok = /#k=([A-Za-z0-9_-]+)/.exec(r)![1];
+    const hash = senderHash("whatsapp", "254700000001");
+    const id = (await pool.query(`SELECT task_id FROM channel_identities WHERE sender_hash=$1`, [hash])).rows[0];
+    expect((await getTaskView(id.task_id, tok)).viewer.roles).toEqual(["payer"]);
+    const kept = (await pool.query(`SELECT count(*)::int n FROM channel_inbox WHERE contact_name IS NOT NULL`)).rows[0].n;
+    expect(kept).toBe(0);
   });
 });

@@ -3,12 +3,14 @@ package inbound
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/dadstyping/whatsapp-connector/internal/store"
 	"github.com/dadstyping/whatsapp-connector/internal/transport"
+	"github.com/dadstyping/whatsapp-connector/internal/tsapp"
 )
 
 const downloadTimeout = 60 * time.Second
@@ -69,6 +71,14 @@ func (g *Ingestor) Ingest(ctx context.Context, m transport.Message) {
 	}
 	if row.ReceivedAt.IsZero() {
 		row.ReceivedAt = g.Now().UTC()
+	}
+	switch m.Kind {
+	case transport.KindLocation:
+		b, _ := json.Marshal(tsapp.Location{Lat: m.Lat, Lon: m.Lon})
+		row.Extra = `{"location":` + string(b) + `}`
+	case transport.KindContact:
+		b, _ := json.Marshal(tsapp.Contact{Name: m.ContactName})
+		row.Extra = `{"contact":` + string(b) + `}`
 	}
 	if m.Kind == transport.KindImage {
 		data, err := g.download(ctx, m)

@@ -24,6 +24,8 @@ const (
 	KindEdit
 	KindReaction
 	KindMedia
+	KindLocation
+	KindContact
 )
 
 type Message struct {
@@ -39,6 +41,10 @@ type Message struct {
 	// Image downloads the media, failing with ErrTooLarge past max bytes.
 	Image     func(ctx context.Context, max int64) ([]byte, error)
 	Timestamp time.Time
+	// A shared pin, rounded to about 1 km before it leaves this process.
+	Lat, Lon float64
+	// A shared contact card's display name; its numbers are never read.
+	ContactName string
 }
 
 const (

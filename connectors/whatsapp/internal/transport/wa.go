@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"regexp"
 	"sync"
@@ -214,6 +215,14 @@ func mapMessage(cl *whatsmeow.Client, e *events.Message) *Message {
 			}
 			return f.buf, nil
 		}
+	case msg.GetLocationMessage() != nil:
+		l := msg.GetLocationMessage()
+		m.Kind, m.Lat, m.Lon = KindLocation, round2(l.GetDegreesLatitude()), round2(l.GetDegreesLongitude())
+	case msg.GetLiveLocationMessage() != nil:
+		l := msg.GetLiveLocationMessage()
+		m.Kind, m.Lat, m.Lon = KindLocation, round2(l.GetDegreesLatitude()), round2(l.GetDegreesLongitude())
+	case msg.GetContactMessage() != nil:
+		m.Kind, m.ContactName = KindContact, msg.GetContactMessage().GetDisplayName()
 	case msg.GetConversation() != "":
 		m.Kind, m.Text = KindText, msg.GetConversation()
 	case msg.GetExtendedTextMessage() != nil:
@@ -224,6 +233,9 @@ func mapMessage(cl *whatsmeow.Client, e *events.Message) *Message {
 	}
 	return m
 }
+
+// round2 keeps about 1 km of precision: enough for an area, not a door.
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 // senderDigits resolves a phone number for PN and LID addressed senders.
 func senderDigits(cl *whatsmeow.Client, i types.MessageInfo) string {

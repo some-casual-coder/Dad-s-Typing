@@ -107,7 +107,24 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
+	if err := addExtra(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// addExtra adds the pin/contact column to stores created before it existed.
+func addExtra(db *sql.DB) error {
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('inbox') WHERE name='extra'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE inbox ADD COLUMN extra TEXT`)
+	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -121,6 +138,8 @@ type InboxMsg struct {
 	Text       string
 	ImageMime  string
 	ImageB64   string
+	// JSON for a pin or contact card; cleared once forwarded
+	Extra      string
 	ReceivedAt time.Time
 	Attempts   int
 }
@@ -134,11 +153,11 @@ func (s *Store) InsertInbox(ctx context.Context, m InboxMsg, now time.Time) (boo
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO inbox
-	  (provider_id, sender, text, image_mime, image_b64, received_at,
+	  (provider_id, sender, text, image_mime, image_b64, extra, received_at,
 	   state, next_attempt_at)
-	  VALUES (?,?,?,?,?,?,?,?)`,
+	  VALUES (?,?,?,?,?,?,?,?,?)`,
 		m.ProviderID, m.Sender, nullable(m.Text), nullable(m.ImageMime),
-		nullable(m.ImageB64), ms(m.ReceivedAt), InboxReceived, ms(now))
+		nullable(m.ImageB64), nullable(m.Extra), ms(m.ReceivedAt), InboxReceived, ms(now))
 	if err != nil {
 		return false, err
 	}
@@ -192,21 +211,21 @@ func (s *Store) ForgetSender(ctx context.Context, sender string) error {
 // NextDue returns the oldest due row (received, or failed on its slow retry).
 func (s *Store) NextDue(ctx context.Context, now time.Time) (*InboxMsg, error) {
 	var m InboxMsg
-	var text, mime, b64 sql.NullString
+	var text, mime, b64, extra sql.NullString
 	var rec int64
 	err := s.db.QueryRowContext(ctx, `SELECT id, provider_id, sender, text,
-	  image_mime, image_b64, received_at, attempts FROM inbox
+	  image_mime, image_b64, extra, received_at, attempts FROM inbox
 	  WHERE state IN (?,?) AND next_attempt_at<=?
 	  ORDER BY next_attempt_at, id LIMIT 1`,
 		InboxReceived, InboxFailed, ms(now)).Scan(&m.ID, &m.ProviderID,
-		&m.Sender, &text, &mime, &b64, &rec, &m.Attempts)
+		&m.Sender, &text, &mime, &b64, &extra, &rec, &m.Attempts)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	m.Text, m.ImageMime, m.ImageB64 = text.String, mime.String, b64.String
+	m.Text, m.ImageMime, m.ImageB64, m.Extra = text.String, mime.String, b64.String, extra.String
 	m.ReceivedAt = time.UnixMilli(rec).UTC()
 	return &m, nil
 }
@@ -226,7 +245,7 @@ func (s *Store) NextInboxAt(ctx context.Context) (time.Time, bool, error) {
 // MarkForwarded drops the payload; the app owns it from here.
 func (s *Store) MarkForwarded(ctx context.Context, id int64, now time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE inbox SET state=?, text=NULL,
-	  image_b64=NULL, image_mime=NULL, last_error=NULL, settled_at=?
+	  image_b64=NULL, image_mime=NULL, extra=NULL, last_error=NULL, settled_at=?
 	  WHERE id=?`, InboxForwarded, ms(now), id)
 	return err
 }

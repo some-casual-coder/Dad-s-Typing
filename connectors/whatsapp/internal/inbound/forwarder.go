@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"math/rand/v2"
@@ -87,6 +88,15 @@ func (f *Forwarder) Step(ctx context.Context) (bool, error) {
 	}
 	if m.ImageB64 != "" {
 		p.Image = &tsapp.Image{Mime: m.ImageMime, Base64: m.ImageB64}
+	}
+	if m.Extra != "" {
+		var x struct {
+			Location *tsapp.Location `json:"location"`
+			Contact  *tsapp.Contact  `json:"contact"`
+		}
+		if json.Unmarshal([]byte(m.Extra), &x) == nil {
+			p.Location, p.Contact = x.Location, x.Contact
+		}
 	}
 	status, perr := f.Post.Inbound(ctx, p)
 	if perr == nil {

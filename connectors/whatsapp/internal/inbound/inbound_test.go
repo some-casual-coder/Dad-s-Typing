@@ -444,3 +444,39 @@ func TestDownloadHasDeadlineAndCap(t *testing.T) {
 	})
 	g.Ingest(context.Background(), m)
 }
+
+func TestLocationAndContactForwardedThenCleared(t *testing.T) {
+	ctx := context.Background()
+	r := newRig(t)
+	f := r.forwarder()
+	loc := text("LOC1")
+	loc.Kind, loc.Text, loc.Lat, loc.Lon = transport.KindLocation, "", -1.27, 36.8
+	card := text("VC1")
+	card.Kind, card.Text, card.ContactName = transport.KindContact, "", "Dad"
+	if Filter(loc) != "" || Filter(card) != "" {
+		t.Fatalf("filter: %q %q", Filter(loc), Filter(card))
+	}
+	r.ingestor(f).Ingest(ctx, loc)
+	r.ingestor(f).Ingest(ctx, card)
+	drain(t, f, ctx)
+	var gotLoc, gotCard bool
+	for _, p := range r.ts.Last {
+		if p.Location != nil && p.Location.Lat == -1.27 && p.Location.Lon == 36.8 && p.Text == "" {
+			gotLoc = true
+		}
+		if p.Contact != nil && p.Contact.Name == "Dad" {
+			gotCard = true
+		}
+	}
+	if !gotLoc || !gotCard {
+		t.Fatalf("payloads %+v", r.ts.Last)
+	}
+	if st, _ := state(t, r, "LOC1"); st != store.InboxForwarded {
+		t.Fatalf("state %s", st)
+	}
+	zero := text("LOC2")
+	zero.Kind, zero.Text = transport.KindLocation, ""
+	if Filter(zero) == "" {
+		t.Fatal("a 0,0 pin should be dropped")
+	}
+}

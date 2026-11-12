@@ -25,3 +25,12 @@ describe("places", () => {
     expect(answerFromText("yes but it has to open from the top", cur)).toBeNull();
   });
 });
+
+describe("place labels", () => {
+  it("never repeats the county", async () => {
+    const { placeLabel } = await import("@/domain/destination");
+    expect(placeLabel({ area: "near Kisumu", county: "Kisumu" })).toBe("near Kisumu");
+    expect(placeLabel({ area: "Westlands", county: "Nairobi" })).toBe("Westlands, Nairobi");
+    expect(placeLabel({ area: "", county: "Nairobi" })).toBe("Nairobi");
+  });
+});

@@ -46,7 +46,8 @@ export async function inferForSender(c: Tx, taskId: string, channel: string, sen
   return "none";
 }
 
-export const placeLabel = (d: { county: string; area: string }) => (d.area && d.area !== d.county ? `${d.area}, ${d.county}` : d.county);
+export const placeLabel = (d: { county: string; area: string }) =>
+  !d.area || d.area === d.county ? d.county : d.area.includes(d.county) ? d.area : `${d.area}, ${d.county}`;
 
 export const askLine = (d: Destination | null) =>
   `Deliver to ${d ? placeLabel(d) : "Nairobi"}? Reply YES, name your town or area, or share a location pin.`;

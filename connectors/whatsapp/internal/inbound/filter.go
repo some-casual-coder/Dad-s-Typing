@@ -60,6 +60,14 @@ func Filter(m transport.Message) string {
 		if m.ImageSize > MaxImageBytes {
 			return DropOversize
 		}
+	case transport.KindLocation:
+		if m.Lat < -90 || m.Lat > 90 || m.Lon < -180 || m.Lon > 180 || (m.Lat == 0 && m.Lon == 0) {
+			return DropEmpty
+		}
+	case transport.KindContact:
+		if m.ContactName == "" || utf8.RuneCountInString(m.ContactName) > 80 {
+			return DropEmpty
+		}
 	default:
 		return DropKind
 	}

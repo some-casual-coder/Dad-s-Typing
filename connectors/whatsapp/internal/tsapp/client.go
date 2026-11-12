@@ -112,12 +112,23 @@ type Image struct {
 	Base64 string `json:"base64"`
 }
 
+type Location struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
+type Contact struct {
+	Name string `json:"name"`
+}
+
 type InboundPayload struct {
-	ProviderMessageID string `json:"providerMessageId"`
-	Sender            string `json:"sender"`
-	Text              string `json:"text,omitempty"`
-	Image             *Image `json:"image,omitempty"`
-	ReceivedAt        string `json:"receivedAt"`
+	ProviderMessageID string    `json:"providerMessageId"`
+	Sender            string    `json:"sender"`
+	Text              string    `json:"text,omitempty"`
+	Image             *Image    `json:"image,omitempty"`
+	Location          *Location `json:"location,omitempty"`
+	Contact           *Contact  `json:"contact,omitempty"`
+	ReceivedAt        string    `json:"receivedAt"`
 }
 
 func (c *Client) Inbound(ctx context.Context, p InboundPayload) (string, error) {

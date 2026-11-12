@@ -53,7 +53,10 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   const reply = (scrubModelText(result?.reply ?? "") || FALLBACK).slice(0, 2000);
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
   const item = result?.item;
-  // the next poll picks the offers up; the reply never waits on the catalogue
-  if (item) void claimExternalSearch(taskId, item).then((first) => (first ? seedExternalOffers(taskId, item) : undefined)).catch(() => console.error("channel_error", "seed_external"));
+  // The browser's next poll picks the offers up; a chat reply cannot be
+  // edited later, so a channel waits for the search on the item the AI named
+  const search = item ? claimExternalSearch(taskId, item).then((first) => (first ? seedExternalOffers(taskId, item) : undefined))
+    .catch(() => console.error("channel_error", "seed_external")) : null;
+  if (search && input.channel) await search;
   return getExchange(taskId, token, input.key, input.channel);
 }

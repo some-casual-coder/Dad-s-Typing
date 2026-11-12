@@ -1,8 +1,10 @@
 // Test connector for any channel: node --env-file=.env.local scripts/channel-sim.mjs <channel> <sender> "<text>" [image.png]
+// A pin or a contact card instead of text: --pin=-1.29,36.78  --contact="Dad"
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-const [channel, sender, text, imagePath] = process.argv.slice(2).filter((a) => a !== "--force");
+const [channel, sender, text, imagePath] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const flag = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 if (!channel || !sender) {
   console.error('usage: channel-sim.mjs <channel> <sender> "<text>" [image.png]');
   process.exit(1);
@@ -32,6 +34,9 @@ async function call(path, body) {
 const msg = { providerMessageId: `sim.${Date.now()}`, sender, receivedAt: new Date().toISOString() };
 if (text) msg.text = text;
 if (imagePath) msg.image = { mime: "image/png", base64: readFileSync(imagePath).toString("base64") };
+const pin = flag("pin");
+if (pin) { const [lat, lon] = pin.split(",").map(Number); msg.location = { lat, lon }; }
+if (flag("contact")) msg.contact = { name: flag("contact") };
 const sent = await call(`/api/channel/${channel}/inbound`, msg);
 console.log("inbound:", sent.status, JSON.stringify(sent.json));
 

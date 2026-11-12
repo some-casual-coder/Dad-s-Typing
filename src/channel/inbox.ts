@@ -2,14 +2,18 @@ import { randomUUID } from "node:crypto";
 import { seedDemoOffers, seedExternalOffers } from "@/catalog/demo";
 import { postExchange } from "@/chat/exchange";
 import { validateImage } from "@/chat/image";
+import { FX_BUFFER_PCT } from "@/delivery/fx";
 import { placeFromPin } from "@/delivery/places";
 import { tx } from "@/domain/db";
 import { subscribe } from "@/domain/concierge";
 import { answerFromText, askLine, getDestination, inferForSender, placeLabel, putDestination, saveProfile } from "@/domain/destination";
 import { DomainError } from "@/domain/errors";
-import { createTask } from "@/domain/tasks";
+import { getDelivery } from "@/domain/delivery";
+import { claimExternalSearch } from "@/domain/offers";
+import { createInvite, createSellerOrder, createTask, getComparison, selectOffer } from "@/domain/tasks";
 import { getTaskView } from "@/domain/view";
 import { deriveChannelToken, senderHash } from "./bridge";
+import { menuCards, renderChosen, renderOptions } from "./render";
 import { allowedSenders, channelIds, getChannel, isConfigured, type ChannelDef } from "./registry";
 
 const MAX_ATTEMPTS = 5;
@@ -23,10 +27,12 @@ export interface InboundInput {
   image?: { mime: string; base64: string }; receivedAt: string;
   // Mapped from a location pin; the coordinates themselves are dropped
   place?: { county: string; area: string } | "outside_kenya";
+  // A shared contact card: only its display name, used as a label
+  contactName?: string;
 }
 
 export function parseInbound(def: ChannelDef, b: Record<string, unknown>): InboundInput {
-  const id = b.providerMessageId, sender = b.sender, text = b.text, image = b.image, at = b.receivedAt, loc = b.location;
+  const id = b.providerMessageId, sender = b.sender, text = b.text, image = b.image, at = b.receivedAt, loc = b.location, card = b.contact;
   if (typeof id !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(id)) throw new DomainError("invalid", "providerMessageId");
   if (typeof sender !== "string" || !def.sender.test(sender)) throw new DomainError("invalid", "sender");
   if (text !== undefined && (typeof text !== "string" || text.length > 4000)) throw new DomainError("invalid", "text");
@@ -48,8 +54,15 @@ export function parseInbound(def: ChannelDef, b: Record<string, unknown>): Inbou
     if (r === "invalid") throw new DomainError("invalid", "location");
     place = r === "outside_kenya" ? r : { county: r.county, area: r.area };
   }
-  if (!text?.trim() && !img && !place) throw new DomainError("invalid", "empty message");
-  return { providerMessageId: id, sender, text: text?.trim() || undefined, image: img, receivedAt: when.toISOString(), ...(place ? { place } : {}) };
+  let contactName: string | undefined;
+  if (card !== undefined) {
+    const name = typeof card === "object" && card !== null ? (card as Record<string, unknown>).name : undefined;
+    if (typeof name !== "string" || !name.trim()) throw new DomainError("invalid", "contact");
+    contactName = name.replace(/[^\p{L}\p{N} .'-]/gu, "").trim().slice(0, 40) || "them";
+  }
+  if (!text?.trim() && !img && !place && !contactName) throw new DomainError("invalid", "empty message");
+  return { providerMessageId: id, sender, text: text?.trim() || undefined, image: img, receivedAt: when.toISOString(),
+    ...(place ? { place } : {}), ...(contactName ? { contactName } : {}) };
 }
 
 // Persist first, process later: a restart or retry can never lose or repeat a message
@@ -57,10 +70,10 @@ export async function enqueueInbound(channel: string, m: InboundInput): Promise<
   if (!allowedSenders(channel).has(m.sender)) return "ignored";
   return tx(async (c) => {
     const r = await c.query(
-      `INSERT INTO channel_inbox (id,channel,provider_message_id,sender,body,image_mime,image_b64,received_at,place_county,place_area)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (channel, provider_message_id) DO NOTHING`,
+      `INSERT INTO channel_inbox (id,channel,provider_message_id,sender,body,image_mime,image_b64,received_at,place_county,place_area,contact_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (channel, provider_message_id) DO NOTHING`,
       [randomUUID(), channel, m.providerMessageId, m.sender, m.text ?? "", m.image?.mime ?? null, m.image?.base64 ?? null, m.receivedAt,
-        m.place === "outside_kenya" ? "" : m.place?.county ?? null, m.place === "outside_kenya" ? "outside_kenya" : m.place?.area ?? null],
+        m.place === "outside_kenya" ? "" : m.place?.county ?? null, m.place === "outside_kenya" ? "outside_kenya" : m.place?.area ?? null, m.contactName ?? null],
     );
     return r.rowCount ? "accepted" : "duplicate";
   });
@@ -86,7 +99,7 @@ async function claimInbox(channel: string): Promise<Row | null> {
        ON CONFLICT (dedupe_key) DO NOTHING`,
       [MAX_ATTEMPTS, channel, SORRY],
     );
-    await c.query(`UPDATE channel_inbox SET state='failed', image_b64=NULL, sender='', body='' WHERE channel=$2 AND state='processing' AND locked_until < now() AND attempts >= $1`, [MAX_ATTEMPTS, channel]);
+    await c.query(`UPDATE channel_inbox SET state='failed', image_b64=NULL, sender='', body='', place_county=NULL, place_area=NULL, contact_name=NULL WHERE channel=$2 AND state='processing' AND locked_until < now() AND attempts >= $1`, [MAX_ATTEMPTS, channel]);
     const r = await c.query(
       `UPDATE channel_inbox SET state='processing', attempts=attempts+1, locked_until=now()+interval '3 minutes'
         WHERE id = (SELECT id FROM channel_inbox WHERE channel=$1 AND (state='received' OR (state='processing' AND locked_until < now()))
@@ -97,9 +110,9 @@ async function claimInbox(channel: string): Promise<Row | null> {
   });
 }
 
-export function composeReply(o: { reply: string; proposals: { key: string; op: string; value: string | number; unit?: string }[]; link: string; fresh: boolean; maxChars: number }) {
+export function composeReply(o: { reply: string; extra?: string[]; proposals: { key: string; op: string; value: string | number; unit?: string }[]; link: string; fresh: boolean; maxChars: number }) {
   const tail = o.fresh ? `Your task is ready: ${o.link}` : `Your task: ${o.link}`;
-  const head = [o.reply.trim().slice(0, 600)];
+  const head = [o.reply.trim().slice(0, o.maxChars < 1000 ? 140 : 600), ...(o.extra ?? []).filter(Boolean)];
   if (o.proposals.length) {
     head.push("I understood: " + o.proposals.map((p) => `${p.key.replace(/_/g, " ")} ${p.op} ${p.value}${p.unit ?? ""}`).join("; ") + ". Please confirm on the page.");
   }
@@ -132,7 +145,7 @@ async function resolveTask(channel: string, row: Row, hasImage: boolean) {
   const title = ((row.body as string) || `Request from ${getChannel(channel).label}`).replace(/\s+/g, " ").slice(0, 80);
   let dest = "none" as "known" | "ask" | "none";
   const made = await createTask({
-    title, starterRoles: ["helper", "payer"], starterLabel: getChannel(channel).label, grantTtlDays: GRANT_DAYS, deriveToken: (id) => deriveChannelToken(channel, id),
+    title, starterRoles: ["requester", "chooser", "helper", "payer"], starterLabel: getChannel(channel).label, grantTtlDays: GRANT_DAYS, deriveToken: (id) => deriveChannelToken(channel, id),
     inTx: async (c, ids) => {
       await c.query(
         `INSERT INTO channel_identities (channel,sender_hash,task_id,grant_id) VALUES ($1,$2,$3,$4)
@@ -144,7 +157,6 @@ async function resolveTask(channel: string, row: Row, hasImage: boolean) {
     },
   });
   await seedDemoOffers(made.taskId).catch(() => console.error("channel_error", "seed_demo"));
-  await seedExternalOffers(made.taskId, title).catch(() => console.error("channel_error", "seed_external"));
   return { taskId: made.taskId, token: made.token, fresh: true, dest };
 }
 
@@ -154,7 +166,7 @@ async function finish(channel: string, row: Row, body: string) {
       `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (dedupe_key) DO NOTHING`,
       [randomUUID(), channel, row.sender, body, `inbox:${row.id}`],
     );
-    await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, sender='', body='', place_county=NULL, place_area=NULL, locked_until=NULL WHERE id=$1`, [row.id]);
+    await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, sender='', body='', place_county=NULL, place_area=NULL, contact_name=NULL, locked_until=NULL WHERE id=$1`, [row.id]);
   });
 }
 
@@ -194,17 +206,81 @@ async function handleDestination(channel: string, row: Row): Promise<string | nu
   });
 }
 
+// Same buffered rate as the cards' top end, since the card is charged in USD
+const kes = (minor: number, rate?: number) =>
+  (rate ? `about KSh ${(Math.round((minor * rate * (1 + (FX_BUFFER_PCT.USD ?? 5) / 100)) / 1e10) * 100).toLocaleString("en-KE")}` : null);
+
+// "1", "2"... picks from the options this sender was last shown; money is
+// only ever approved on the signed page
+async function handleChoice(channel: string, row: Row): Promise<string | null> {
+  const m = /^\s*([1-9])\s*[.)]?\s*$/.exec((row.body as string) || "");
+  if (!m || row.image_b64) return null;
+  const hash = senderHash(channel, row.sender as string);
+  const task = await openTask(channel, hash);
+  if (!task) return null;
+  const menu = (await tx((c) => c.query(`SELECT offer_ids FROM channel_menus WHERE task_id=$1 AND channel=$2 AND sender_hash=$3`, [task.taskId, channel, hash]))).rows[0];
+  const offerId = menu?.offer_ids?.[Number(m[1]) - 1] as string | undefined;
+  if (!offerId) return menu ? `Please reply with a number from the list, or open: ${link(task.taskId, task.token)}` : null;
+  const cmp = await getComparison(task.taskId, task.token);
+  const key = `${channel}:${row.provider_message_id}`;
+  try {
+    const sel = await selectOffer(task.taskId, task.token, { offerId, expectedVersion: cmp.version }, { idempotencyKey: key });
+    const order = await createSellerOrder(task.taskId, task.token, { selectionId: sel.selectionId });
+    const v = await getTaskView(task.taskId, task.token);
+    const c = v.order?.concierge;
+    const fx = c ? (await tx((x) => x.query(`SELECT fx FROM concierge_orders WHERE seller_order_id=$1`, [order.id]))).rows[0]?.fx : null;
+    return renderChosen({ title: order.title, totalMinor: order.totalMinor, currency: order.currency, concierge: order.kind === "concierge",
+      arrival: c?.arrival ?? null, kes: kes(order.totalMinor, fx?.USD?.kesPerUnitMicro) }, link(task.taskId, task.token));
+  } catch (e) {
+    if (e instanceof DomainError && (e.code === "not_payable" || e.code === "stale" || e.code === "invalid"))
+      return `That one can't be paid in one step yet: ${e.message}. Pick another number, or open: ${link(task.taskId, task.token)}`;
+    throw e;
+  }
+}
+
+// A contact card becomes a link that person can use to pay; no number is kept
+async function handleContact(channel: string, row: Row): Promise<string | null> {
+  if (!row.contact_name) return null;
+  const task = await openTask(channel, senderHash(channel, row.sender as string));
+  if (!task) return "Send me what you're looking for first, then share the contact who will pay.";
+  const name = row.contact_name as string;
+  const inv = await createInvite(task.taskId, task.token, { roles: ["payer"], label: name });
+  return `Forward this link to ${name} so they can review and pay. It only lets them pay, not change the choice:\n${link(task.taskId, inv.token)}`;
+}
+
+async function optionsBlock(channel: string, hash: string, taskId: string, token: string): Promise<string> {
+  const d = await getDelivery(taskId, token).catch(() => null);
+  if (!d) return "";
+  const compact = getChannel(channel).maxReplyChars < 1000;
+  const cards = menuCards(d.cards, compact ? 2 : 3);
+  if (!cards.length) return "";
+  await tx((c) => c.query(
+    `INSERT INTO channel_menus (task_id,channel,sender_hash,offer_ids) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (task_id,channel,sender_hash) DO UPDATE SET offer_ids=EXCLUDED.offer_ids, created_at=now()`,
+    [taskId, channel, hash, cards.map((x) => x.offerId)]));
+  const where = d.destination?.confirmed ? placeLabel(d.destination) : null;
+  return renderOptions(cards, where, compact);
+}
+
 async function processRow(channel: string, row: Row) {
+  const contact = await handleContact(channel, row);
+  if (contact) return finish(channel, row, contact);
   const answered = await handleDestination(channel, row);
   if (answered) return finish(channel, row, answered);
+  const chosen = await handleChoice(channel, row);
+  if (chosen) return finish(channel, row, chosen);
   const image = row.image_b64 ? { mime: row.image_mime as string, base64: row.image_b64 as string } : undefined;
   const { taskId, token, fresh, dest } = await resolveTask(channel, row, !!image);
   await tx((c) => subscribe(c, taskId, channel, senderHash(channel, row.sender as string), row.sender as string));
   const ex = await postExchange(taskId, token, { channel, key: `${channel}:${row.provider_message_id}`, text: (row.body as string) || undefined, image });
+  // No item named by the AI: search the words they sent, once
+  if (fresh && row.body && (await claimExternalSearch(taskId, row.body as string)))
+    await seedExternalOffers(taskId, (row.body as string).slice(0, 80)).catch(() => console.error("channel_error", "seed_external"));
   const reply = ex.messages.find((m) => m.role === "assistant")?.body ?? "";
   const where = dest === "ask" ? askLine(null) : dest === "known"
     ? `Delivering to ${placeLabel((await tx((c) => getDestination(c, taskId)))!)}, as last time.` : "";
-  const body = composeReply({ reply: where ? `${reply.trim()}\n\n${where}` : reply, proposals: ex.proposals as never, link: link(taskId, token), fresh,
+  const options = await optionsBlock(channel, senderHash(channel, row.sender as string), taskId, token);
+  const body = composeReply({ reply, extra: [options, where], proposals: ex.proposals as never, link: link(taskId, token), fresh,
     maxChars: getChannel(channel).maxReplyChars });
   await finish(channel, row, body);
 }

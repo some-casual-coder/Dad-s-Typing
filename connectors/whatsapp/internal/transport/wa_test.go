@@ -70,3 +70,16 @@ func TestMapMessageEditAndLID(t *testing.T) {
 		t.Errorf("lid alt not used: %+v", m)
 	}
 }
+
+func TestMapLocationAndContact(t *testing.T) {
+	m := mapMessage(nil, ev(&waE2E.Message{LocationMessage: &waE2E.LocationMessage{
+		DegreesLatitude: proto.Float64(-1.265432), DegreesLongitude: proto.Float64(36.803219)}}))
+	if m.Kind != KindLocation || m.Lat != -1.27 || m.Lon != 36.8 {
+		t.Fatalf("location %+v", m)
+	}
+	c := mapMessage(nil, ev(&waE2E.Message{ContactMessage: &waE2E.ContactMessage{
+		DisplayName: proto.String("Dad"), Vcard: proto.String("BEGIN:VCARD\nTEL:+254700000000\nEND:VCARD")}}))
+	if c.Kind != KindContact || c.ContactName != "Dad" || c.Text != "" {
+		t.Fatalf("contact %+v", c)
+	}
+}
