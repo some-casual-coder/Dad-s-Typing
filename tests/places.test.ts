@@ -1,6 +1,6 @@
 import "./env";
 import { describe, expect, it } from "vitest";
-import { isKenyanNumber, placeFromPin, placeFromText } from "@/delivery/places";
+import { countyAt, isKenyanNumber, placeFromPin, placeFromText } from "@/delivery/places";
 import { answerFromText } from "@/domain/destination";
 
 describe("places", () => {
@@ -45,5 +45,21 @@ describe("destination input never takes a street address", () => {
     const t = await createTask({ title: "x", starterRoles: ["requester", "chooser"], starterLabel: "Me" });
     expect(await setDestination(t.taskId, t.token, { place: "Kakuma" })).toEqual({ county: "Kakuma", area: "" });
     await expect(setDestination(t.taskId, t.token, { place: "14 Riverside Drive, Apt 3" })).rejects.toMatchObject({ code: "invalid" });
+  });
+});
+
+describe("county boundaries (OpenStreetMap)", () => {
+  it("puts border neighbourhoods in the right county", () => {
+    expect(countyAt(-1.207, 36.776)).toBe("Kiambu");
+    expect(countyAt(-1.2699910, 36.8112181)).toBe("Nairobi");
+    expect(countyAt(-1.365, 36.93)).toBe("Machakos");
+    expect(countyAt(-1.474, 36.961)).toBe("Kajiado");
+    expect(countyAt(-4.04, 39.67)).toBe("Mombasa");
+    expect(countyAt(51.5, -0.1)).toBeNull();
+  });
+  it("labels the area only from the pin's own county", () => {
+    expect(placeFromPin(-1.207, 36.776)).toEqual({ area: "Ruaka", county: "Kiambu", approximate: false });
+    // Far from any listed town: the county itself, never a town across a border
+    expect(placeFromPin(1.0, 38.5)).toEqual({ area: "Isiolo County", county: "Isiolo", approximate: true });
   });
 });

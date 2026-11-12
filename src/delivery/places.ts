@@ -1,12 +1,15 @@
 // Offline lookup from a location pin or a typed place to county and area, so
-// no geocoder sees the coordinates. Points are approximate town and area
-// centres (our own list); county boundaries (OSM, ODbL) can replace this.
+// no geocoder sees the coordinates. The county comes from OpenStreetMap
+// county boundaries (ODbL, see data/ke-counties.json); area names come from
+// our list of approximate town and neighbourhood centres.
+import counties from "./data/ke-counties.json";
+
 export interface Place { area: string; county: string }
 type Row = [area: string, county: string, lat: number, lon: number];
 
 const COUNTY_TOWNS: Row[] = [
   ["Mombasa", "Mombasa", -4.04, 39.67], ["Kwale", "Kwale", -4.17, 39.45], ["Kilifi", "Kilifi", -3.63, 39.85], ["Hola", "Tana River", -1.5, 40.03],
-  ["Lamu", "Lamu", -2.27, 40.9], ["Voi", "Taita-Taveta", -3.4, 38.56], ["Garissa", "Garissa", -0.45, 39.65], ["Wajir", "Wajir", 1.75, 40.06],
+  ["Lamu", "Lamu", -2.27, 40.9], ["Voi", "Taita Taveta", -3.4, 38.56], ["Garissa", "Garissa", -0.45, 39.65], ["Wajir", "Wajir", 1.75, 40.06],
   ["Mandera", "Mandera", 3.94, 41.86], ["Marsabit", "Marsabit", 2.33, 37.99], ["Isiolo", "Isiolo", 0.35, 37.58], ["Meru", "Meru", 0.05, 37.65],
   ["Chuka", "Tharaka-Nithi", -0.33, 37.65], ["Embu", "Embu", -0.53, 37.45], ["Kitui", "Kitui", -1.37, 38.01], ["Machakos", "Machakos", -1.52, 37.26],
   ["Wote", "Makueni", -1.78, 37.63], ["Ol Kalou", "Nyandarua", -0.27, 36.38], ["Nyeri", "Nyeri", -0.42, 36.95], ["Kerugoya", "Kirinyaga", -0.5, 37.28],
@@ -48,13 +51,35 @@ const nearest = (rows: Row[], lat: number, lon: number) =>
 export type PinResult = (Place & { approximate: boolean }) | "outside_kenya" | "invalid";
 
 // The caller must drop the coordinates after this returns
+type Ring = number[][];
+const inRing = (x: number, y: number, r: Ring) => {
+  let c = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [xi, yi] = r[i], [xj, yj] = r[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+};
+const COUNTIES = (counties as { counties: { name: string; polygons: Ring[][] }[] }).counties;
+
+export function countyAt(lat: number, lon: number): string | null {
+  return COUNTIES.find((k) => k.polygons.some((p) => inRing(lon, lat, p[0]) && !p.slice(1).some((h) => inRing(lon, lat, h))))?.name ?? null;
+}
+
 export function placeFromPin(lat: unknown, lon: unknown): PinResult {
   if (typeof lat !== "number" || typeof lon !== "number" || !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return "invalid";
   if (lat < KENYA.minLat || lat > KENYA.maxLat || lon < KENYA.minLon || lon > KENYA.maxLon) return "outside_kenya";
-  const a = nearest(AREAS, lat, lon);
-  if (a.d <= AREA_KM) return { area: a.p[0], county: a.p[1], approximate: false };
-  const t = nearest([...COUNTY_TOWNS, ...AREAS], lat, lon);
-  return { area: t.d <= TOWN_KM ? `near ${t.p[0]}` : `${t.p[1]} County`, county: t.p[1], approximate: true };
+  const county = countyAt(lat, lon);
+  // Lake or sea edges can miss every polygon; the nearest town decides then
+  if (!county) {
+    const t = nearest([...COUNTY_TOWNS, ...AREAS], lat, lon);
+    return { area: t.d <= TOWN_KM ? `near ${t.p[0]}` : `${t.p[1]} County`, county: t.p[1], approximate: true };
+  }
+  const inCounty = (rows: Row[]) => rows.filter((r) => r[1] === county);
+  const a = inCounty(AREAS).length ? nearest(inCounty(AREAS), lat, lon) : null;
+  if (a && a.d <= AREA_KM) return { area: a.p[0], county, approximate: false };
+  const t = inCounty([...COUNTY_TOWNS, ...AREAS]).length ? nearest(inCounty([...COUNTY_TOWNS, ...AREAS]), lat, lon) : null;
+  return { area: t && t.d <= TOWN_KM ? `near ${t.p[0]}` : `${county} County`, county, approximate: true };
 }
 
 const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();

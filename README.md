@@ -121,6 +121,10 @@ provider checks and from a real Sandbox checkout.
   grant in the URL fragment, which browsers do not send to the server.
 - A scheduled reconciler resolves payments whose capture response was lost.
 
+## Data attribution
+
+Kenya county boundaries in `src/delivery/data/ke-counties.json`: © OpenStreetMap contributors, available under the Open Database Licence (ODbL 1.0), https://www.openstreetmap.org/copyright. Simplified for offline use; location pins are mapped to a county on our server and the coordinates are not stored.
+
 ## Licence
 
 Apache-2.0. See `LICENSE`.
