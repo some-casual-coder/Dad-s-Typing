@@ -24,9 +24,33 @@ export async function createJoinCode(taskId: string, token: string) {
 
 const JOIN = /^\s*join\s+([A-Za-z0-9]{6})\s*$/i;
 
-// Beyond the env allowlist: someone already admitted by a code, or sending a
-// live JOIN code now (it is consumed when processed). Others stay ignored.
+// The website's "Chat with My Plug" button pre-fills this; it admits anyone
+// only when CHANNEL_OPEN_START=1 (a public demo), never by default
+export const BOT_NAME = "My Plug";
+export const START_TEXT = "Hi My Plug! I'd like to try it out.";
+const START = /^\s*hi\W*\s*my\s+plug\b/i;
+export const isStart = (text?: string, env = process.env) => env.CHANNEL_OPEN_START === "1" && !!text && START.test(text);
+
+export const INTRO = [
+  `Hi! I'm *${BOT_NAME}*. I help you buy things from shops abroad and get them to you in Kenya.`,
+  "",
+  "*How it works*",
+  "1. Send a photo, a link or a few words about what you want.",
+  "2. I find options and show the full cost in KSh, delivery included.",
+  "3. Reply with a number to pick one, then pay with PayPal.",
+  "4. Share the link so family can help choose or pay.",
+  "",
+  "Try it now: send a photo of something you'd like.",
+  "",
+  "_This is a demo: PayPal runs in test mode, so no real money moves. Photos and messages are read by an AI service to help with your request._",
+].join("\n");
+export const SAVE_NAME = `BTW, save this number as *${BOT_NAME}* so you can find me easily.`;
+
+// Beyond the env allowlist: someone already admitted by a code, sending a
+// live JOIN code now (it is consumed when processed), or the public demo
+// opener. Others stay ignored.
 export async function admitted(channel: string, sender: string, text?: string): Promise<boolean> {
+  if (isStart(text)) return true;
   const h = senderHash(channel, sender);
   if ((await pool.query(`SELECT 1 FROM channel_admitted_senders WHERE channel=$1 AND sender_hash=$2`, [channel, h])).rowCount) return true;
   const m = text ? JOIN.exec(text) : null;
@@ -45,6 +69,14 @@ export async function optOut(c: Tx, channel: string, hashed: string, sender: str
 
 export const optedOut = async (c: Tx, channel: string, hashed: string) =>
   !!(await c.query(`SELECT 1 FROM channel_opt_outs WHERE channel=$1 AND sender_hash=$2`, [channel, hashed])).rowCount;
+
+// The demo opener admits this sender for later messages and answers with the
+// intro, then a second message about saving the contact
+export async function handleStart(c: Tx, channel: string, hashed: string, text: string): Promise<string[] | null> {
+  if (!isStart(text)) return null;
+  await c.query(`INSERT INTO channel_admitted_senders (channel,sender_hash) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [channel, hashed]);
+  return [INTRO, SAVE_NAME];
+}
 
 // "JOIN ABC123" subscribes this sender; "STOP" unsubscribes them everywhere
 export async function handleJoinOrStop(c: Tx, channel: string, hashed: string, sender: string, text: string): Promise<string | null> {

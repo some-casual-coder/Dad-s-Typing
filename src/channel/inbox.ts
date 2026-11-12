@@ -16,7 +16,7 @@ import { pendingProposals } from "@/domain/messages";
 import { getTaskView } from "@/domain/view";
 import { findLinks, LABEL, withoutSocialLinks } from "@/sources/recognize";
 import { address, contentHash, deriveChannelToken, senderHash } from "./bridge";
-import { admitted, handleJoinOrStop, optedOut, optOut } from "./join";
+import { admitted, handleJoinOrStop, handleStart, optedOut, optOut } from "./join";
 import { menuCards, renderChosen, renderOptions } from "./render";
 import { allowedSenders, channelIds, getChannel, isConfigured, type ChannelDef } from "./registry";
 
@@ -246,11 +246,13 @@ async function resolveTask(channel: string, row: Row, hasImage: boolean) {
   return { taskId: made.taskId, token: made.token, fresh: true, dest };
 }
 
-async function finish(channel: string, row: Row, body: string) {
+// Several bodies go out as separate messages, each a few seconds after the last
+async function finish(channel: string, row: Row, body: string | string[]) {
   await tx(async (c) => {
-    await c.query(
-      `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (dedupe_key) DO NOTHING`,
-      [randomUUID(), channel, row.sender, body, `inbox:${row.id}`],
+    for (const [i, b] of [body].flat().entries()) await c.query(
+      `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key,not_before)
+       VALUES ($1,$2,$3,$4,$5, CASE WHEN $6::int > 0 THEN now() + make_interval(secs => 3 * $6::int) END) ON CONFLICT (dedupe_key) DO NOTHING`,
+      [randomUUID(), channel, row.sender, b, i ? `inbox:${row.id}:${i}` : `inbox:${row.id}`, i],
     );
     await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, sender='', body='', place_county=NULL, place_area=NULL, contact_name=NULL, locked_until=NULL WHERE id=$1`, [row.id]);
   });
@@ -376,6 +378,8 @@ async function afterFinished(channel: string, row: Row): Promise<string | null> 
 
 async function processRow(channel: string, row: Row) {
   if (row.body && !row.image_b64) {
+    const intro = await tx((c) => handleStart(c, channel, senderHash(channel, row.sender as string), row.body as string));
+    if (intro) return finish(channel, row, intro);
     const joined = await tx((c) => handleJoinOrStop(c, channel, senderHash(channel, row.sender as string), row.sender as string, row.body as string));
     if (joined) return finish(channel, row, joined);
   }

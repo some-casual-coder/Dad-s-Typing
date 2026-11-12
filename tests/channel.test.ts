@@ -1,6 +1,6 @@
 import "./env";
 import { existsSync, readFileSync } from "node:fs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pool } from "@/domain/db";
 
 const SECRET = "s".repeat(40);
@@ -557,6 +557,30 @@ describe("payer admitted by starting the chat", () => {
     expect(sub).toEqual([{ can_pay: true }]);
     // From now on they can chat like anyone else
     expect((await signed(inbound, IN, stranger({ text: "STOP" }))).status).toBe(202);
+  });
+});
+
+describe("public demo opener", () => {
+  const stranger = (o: Record<string, unknown>) => msg({ sender: "254799999002", ...o });
+  afterEach(() => { delete process.env.CHANNEL_OPEN_START; });
+
+  it("is ignored unless the open start is switched on", async () => {
+    const { START_TEXT } = await import("@/channel/join");
+    expect((await signed(inbound, IN, stranger({ text: START_TEXT }))).json).toMatchObject({ status: "ignored" });
+  });
+
+  it("admits the sender and replies with the intro, then the save-my-name note a few seconds later", async () => {
+    process.env.CHANNEL_OPEN_START = "1";
+    const { START_TEXT, INTRO, SAVE_NAME } = await import("@/channel/join");
+    expect((await signed(inbound, IN, stranger({ text: START_TEXT }))).status).toBe(202);
+    await processInboxOnce("whatsapp");
+    expect(interpret).not.toHaveBeenCalled();
+    const out = (await pool.query(`SELECT body, not_before > now() AS later FROM channel_outbox WHERE recipient='254799999002' ORDER BY COALESCE(not_before, created_at)`)).rows;
+    expect(out).toEqual([{ body: INTRO, later: null }, { body: SAVE_NAME, later: true }]);
+    expect(INTRO).toMatch(/\*My Plug\*/);
+    // Later messages are let in like anyone admitted
+    delete process.env.CHANNEL_OPEN_START;
+    expect((await signed(inbound, IN, stranger({ text: "a cat carrier" }))).status).toBe(202);
   });
 });
 
