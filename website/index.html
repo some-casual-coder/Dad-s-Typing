@@ -75,10 +75,14 @@ p { margin: 0; }
 @media (prefers-reduced-motion: reduce) { .dots i { animation: none; opacity: .7; } }
 
 /* Header */
+/* Floats over the hero: clear at the top, cream once the page scrolls */
 .top {
-  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
-  background: color-mix(in srgb, var(--cream) 92%, transparent); backdrop-filter: blur(10px);
-  border-bottom: 1px solid color-mix(in srgb, #E9DCC3 70%, transparent);
+  position: fixed; top: env(safe-area-inset-top, 0px); left: 0; right: 0; z-index: 20;
+  background: transparent; transition: background-color .25s ease, box-shadow .25s ease;
+}
+.top.scrolled {
+  background: color-mix(in srgb, var(--cream) 94%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px -18px rgba(18,42,36,.4);
 }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px; }
 .brand { display: inline-flex; align-items: center; gap: .4em; font: 700 1.4rem/1 var(--display); text-decoration: none; color: var(--ink); }
@@ -91,7 +95,7 @@ p { margin: 0; }
 @media (max-width: 760px) { .nav a.link { display: none; } }
 
 /* Hero */
-.hero { position: relative; overflow: hidden; }
+.hero { position: relative; overflow: hidden; padding-top: 68px; }
 .hero .paper {
   position: absolute; inset: -10% 0 auto 0; height: 120%; z-index: 0; pointer-events: none;
   background: url(img/cream-paper-background.webp) center/cover no-repeat; opacity: .9;
@@ -653,6 +657,14 @@ footer .wrap { display: grid; gap: 18px; }
     io.observe(chat);
   }
 
+})();
+</script>
+<script>
+(() => {
+  const top = document.querySelector(".top");
+  const mark = () => top.classList.toggle("scrolled", scrollY > 8);
+  mark();
+  addEventListener("scroll", mark, { passive: true });
 })();
 </script>
 </body>
