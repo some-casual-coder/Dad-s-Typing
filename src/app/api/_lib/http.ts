@@ -1,3 +1,4 @@
+import { unstable_rethrow } from "next/navigation";
 import { DomainError } from "@/domain/errors";
 import { AdapterError } from "@/adapters/types";
 
@@ -30,6 +31,7 @@ export function handle<P = Record<string, never>>(fn: (req: Request, params: P) 
     try {
       return await fn(req, (await ctx?.params) ?? ({} as P));
     } catch (e) {
+      unstable_rethrow(e);
       if (e instanceof HttpError) return json(body(e.code, e.message), e.status);
       if (e instanceof DomainError) return json(body(e.code, e.message), e.status);
       if (e instanceof AdapterError) {

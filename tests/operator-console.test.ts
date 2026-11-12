@@ -8,6 +8,8 @@ vi.mock("@/adapters", () => ({
   getPayments: () => ({}), getInterpreter: () => ({}), getDiscovery: () => ({}),
   getFx: () => ({ kesRate: async () => ({ rate: 130, date: "2026-11-11", source: "test rate" }) }),
 }));
+// Called outside a Next request here
+vi.mock("next/server", async (orig) => ({ ...(await orig<object>()), connection: async () => {} }));
 
 import { POST as session } from "@/app/api/operator/session/route";
 import { GET as orders } from "@/app/api/operator/orders/route";
