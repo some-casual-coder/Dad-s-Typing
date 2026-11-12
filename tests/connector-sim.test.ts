@@ -31,6 +31,7 @@ import { POST as ackRoute } from "@/app/api/channel/[channel]/outbox/[id]/ack/ro
 import { sign } from "@/channel/bridge";
 import { composeReply, processInboxOnce } from "@/channel/inbox";
 import { optionLabels } from "@/channel/render";
+import { pendingProposals } from "@/domain/messages";
 import { setRequirement, createInvite, createSellerOrder, getComparison, revokeGrant, selectOffer } from "@/domain/tasks";
 import { getTaskView } from "@/domain/view";
 
@@ -97,6 +98,22 @@ describe("C02 Instagram DM: a shared Reel that can't be opened", () => {
       expect(await tasks()).toBe(before);
     }
     expect(interpret).not.toHaveBeenCalled();
+  });
+});
+
+describe("chat options follow what was just asked for", () => {
+  it("a proposed 'opens from the top' leaves out front-opening and unknown-opening options", async () => {
+    await say("instagram", { image: IMG, text: "it must open from the top" });
+    const options = (await last("instagram")).split("\n").filter((l) => /^\d\) /.test(l));
+    expect(options.length).toBeGreaterThan(0);
+    for (const o of options) expect(o).toMatch(/Skylift/);
+    // and the page the link opens shows the same thing to confirm
+    const t = linkIn(await last("instagram"))!;
+    expect(await pendingProposals(t.taskId, t.token)).toEqual([expect.objectContaining({ key: "opening", op: "eq", value: "top" })]);
+    // with nothing proposed, the usual options come back
+    interpret.mockResolvedValueOnce({ observations: [], clarification: null, reply: "Sure.", proposedRequirements: [] });
+    await say("messenger", { image: IMG, text: "a cat carrier" });
+    expect((await last("messenger")).split("\n").filter((l) => /^\d\) /.test(l)).some((l) => !/Skylift/.test(l))).toBe(true);
   });
 });
 

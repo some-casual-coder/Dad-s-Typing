@@ -11,6 +11,8 @@ import { DomainError } from "@/domain/errors";
 import { getDelivery } from "@/domain/delivery";
 import { claimExternalSearch } from "@/domain/offers";
 import { createInvite, createSellerOrder, createTask, getComparison, selectOffer } from "@/domain/tasks";
+import type { Attribute, Requirement } from "@/domain/eligibility";
+import { pendingProposals } from "@/domain/messages";
 import { getTaskView } from "@/domain/view";
 import { findLinks, LABEL, withoutSocialLinks } from "@/sources/recognize";
 import { address, contentHash, deriveChannelToken, senderHash } from "./bridge";
@@ -337,7 +339,11 @@ async function optionsBlock(channel: string, hash: string, taskId: string, token
   const d = await getDelivery(taskId, token).catch(() => null);
   if (!d) return "";
   const compact = getChannel(channel).maxReplyChars < 1000;
-  const cards = menuCards(d.cards, compact ? 2 : 3);
+  const proposed = (await pendingProposals(taskId, token).catch(() => [])) as Requirement[];
+  const ids = [...d.cards.closest, ...d.cards.similar].map((x) => x.offerId);
+  const attrs = new Map((await tx((c) => c.query(`SELECT id, attributes FROM offers WHERE task_id=$1 AND id = ANY($2::uuid[])`, [taskId, ids]))).rows
+    .map((r) => [r.id as string, (r.attributes ?? {}) as Record<string, Attribute>]));
+  const cards = menuCards(d.cards, compact ? 2 : 3, proposed, attrs);
   if (!cards.length) return "";
   await tx((c) => c.query(
     `INSERT INTO channel_menus (task_id,channel,sender_hash,offer_ids) VALUES ($1,$2,$3,$4)

@@ -1,4 +1,5 @@
 import type { Card, Cards } from "@/delivery/present";
+import { evaluate, type Attribute, type Requirement } from "@/domain/eligibility";
 
 // Text renderings of engine state for chat channels: numbered replies and a
 // signed link. Buttons can replace the numbers when a connector supports them.
@@ -6,8 +7,16 @@ const MONTH = /\b(January|February|March|April|May|June|July|August|September|Oc
 const shortDates = (s: string) => s.replace(MONTH, (m) => m.slice(0, 3)).replace(/^about /, "");
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
-export function menuCards(c: Cards, max: number): Card[] {
-  return [...c.closest, ...c.similar].slice(0, max);
+// Chat can't confirm a requirement, so what the shopper just asked for (still
+// only proposed) filters the numbered options: a clear mismatch is never offered,
+// and an offer with unknown details only when nothing is known to match
+export function menuCards(c: Cards, max: number, proposed: Requirement[] = [], attrs: Map<string, Record<string, Attribute>> = new Map()): Card[] {
+  const all = [...c.closest, ...c.similar];
+  const reqs = proposed.filter((r) => r.essential);
+  if (!reqs.length) return all.slice(0, max);
+  const status = (x: Card) => evaluate(reqs, attrs.get(x.offerId) ?? {}).status;
+  const fit = all.filter((x) => status(x) === "eligible");
+  return (fit.length ? fit : all.filter((x) => status(x) === "unresolved")).slice(0, max);
 }
 
 // Clipped titles that come out the same keep the words that tell them apart
