@@ -1,0 +1,131 @@
+# Render Blueprint for Dad's Typing: the live setup in "My Workspace", Frankfurt.
+# These services were created through the Render API; this file records the same
+# configuration as code so it can be recreated or reviewed. Do not create a second
+# Blueprint from it while the services exist (Render would add suffixed copies).
+# Secrets are `sync: false`: set them in the dashboard, never in this file.
+
+envVarGroups:
+  # Shared by the app and the WhatsApp connector: one secret signs both directions
+  - name: dads-typing-bridge
+    envVars:
+      - key: WHATSAPP_BRIDGE_SECRET
+        generateValue: true
+
+databases:
+  - name: dads-typing-db
+    plan: basic-256mb
+    region: frankfurt
+    postgresMajorVersion: "16"
+    diskSizeGB: 1
+    databaseName: dads_typing
+    user: dads_typing
+    ipAllowList: []            # no public access; services connect over the private network
+
+services:
+  # The app: browser journey, API, channel inbox/outbox, payments reconciler
+  - type: web
+    name: dads-typing
+    runtime: node
+    plan: starter
+    region: frankfurt
+    branch: feat/browser-journey
+    buildCommand: npm ci && npm run build
+    preDeployCommand: node scripts/migrate.mjs     # migrations run once, before traffic moves
+    startCommand: npx next start -H 0.0.0.0 -p $PORT
+    healthCheckPath: /api/health                   # 200 only when the database answers
+    maxShutdownDelaySeconds: 60                    # let an in-flight PayPal capture finish
+    autoDeployTrigger: checksPass                  # deploy only after GitHub CI passes
+    buildFilter:
+      ignoredPaths:
+        - website/**
+        - connectors/**
+        - docs/**
+        - .github/**
+        - "**/*.md"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dads-typing-db
+          property: connectionString
+      - fromGroup: dads-typing-bridge
+      - key: APP_BASE_URL
+        value: https://dads-typing.onrender.com
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: TRUST_PROXY
+        value: "1"
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: INTERPRETER_PROVIDER
+        value: openrouter
+      - key: DEMO_MODE
+        value: "true"
+      - key: SESSION_SECRET
+        generateValue: true
+      - { key: OPENROUTER_API_KEY, sync: false }
+      - { key: OPENROUTER_MODEL, sync: false }
+      - { key: STT_MODEL, sync: false }
+      - { key: CHANNEL3_API_KEY, sync: false }
+      - { key: PAYPAL_CLIENT_ID, sync: false }
+      - { key: PAYPAL_CLIENT_SECRET, sync: false }
+      - { key: PAYPAL_MERCHANT_ID, sync: false }
+      - { key: HUB_KENTEX_PIN, sync: false }
+      - { key: HUB_KENTEX_PHONE, sync: false }
+      - { key: HUB_KENTEX_HOURS, sync: false }
+      - { key: HUB_AQUANTUO_ADDRESS, sync: false }
+      - { key: HUB_AQUANTUO_PHONE, sync: false }
+      - { key: HUB_AQUANTUO_HOURS, sync: false }
+      - { key: WHATSAPP_BOT_NUMBER, sync: false }      # set after pairing
+      - { key: WHATSAPP_ALLOWED_SENDERS, sync: false } # set after pairing
+
+  # WhatsApp connector (Go, whatsmeow). Talks to the app over the private network.
+  - type: worker
+    name: dads-typing-whatsapp
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    branch: feat/browser-journey
+    dockerfilePath: ./connectors/whatsapp/Dockerfile
+    dockerContext: ./connectors/whatsapp
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - connectors/whatsapp/**
+      ignoredPaths:
+        - connectors/whatsapp/**/*.md
+    disk:
+      name: whatsapp-session                       # linked-device session; snapshotted daily
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - fromGroup: dads-typing-bridge
+      - key: TS_BASE_URL
+        value: http://dads-typing:10000            # private network, never leaves Render
+      - key: ALLOW_INSECURE_TS_URL
+        value: "1"                                 # plain http is private-network only; requests are HMAC-signed
+      - key: DATA_DIR
+        value: /data
+      - key: ADMIN_TOKEN
+        generateValue: true
+
+  # Landing page
+  - type: web
+    name: dads-typing-site
+    runtime: static
+    branch: feat/browser-journey
+    buildCommand: echo static
+    staticPublishPath: website
+    autoDeployTrigger: commit
+    buildFilter:
+      paths:
+        - website/**
+    headers:
+      - { path: /*, name: X-Content-Type-Options, value: nosniff }
+      - { path: /*, name: X-Frame-Options, value: DENY }
+      - { path: /*, name: Referrer-Policy, value: strict-origin-when-cross-origin }
+      - { path: /*, name: Permissions-Policy, value: "camera=(), microphone=(), geolocation=()" }
+      - { path: /*, name: Strict-Transport-Security, value: max-age=31536000 }
+      - { path: /img/*, name: Cache-Control, value: "public, max-age=604800" }
+      - { path: /index.html, name: Cache-Control, value: "public, max-age=0, must-revalidate" }

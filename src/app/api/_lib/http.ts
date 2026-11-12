@@ -34,13 +34,15 @@ export function handle<P = Record<string, never>>(fn: (req: Request, params: P) 
       unstable_rethrow(e);
       if (e instanceof HttpError) return json(body(e.code, e.message), e.status);
       if (e instanceof DomainError) return json(body(e.code, e.message), e.status);
+      // The edge's request id ties a server error to Render's and the user's report
+      const ray = /^[A-Za-z0-9-]{1,64}$/.exec(req.headers.get("cf-ray") ?? "")?.[0] ?? "";
       if (e instanceof AdapterError) {
-        console.error("api_error", "AdapterError", e.kind);
+        console.error("api_error", "AdapterError", e.kind, ray);
         return e.kind === "timeout"
           ? json(body("provider_timeout", "The service took too long. Please try again."), 504)
           : json(body("provider_unavailable", "The service is unavailable. Please try again."), 502);
       }
-      console.error("api_error", e instanceof Error ? e.name : "unknown", (e as { code?: unknown })?.code ?? "");
+      console.error("api_error", e instanceof Error ? e.name : "unknown", (e as { code?: unknown })?.code ?? "", ray);
       return json(body("internal", "Something went wrong."), 500);
     }
   };

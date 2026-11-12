@@ -1,0 +1,59 @@
+# Render deploys a service only after these checks pass (autoDeployTrigger: checksPass)
+name: CI
+
+on:
+  push:
+    branches: [master, feat/browser-journey]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: dads_typing_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/dads_typing_test
+      TEST_DB_NAME: dads_typing_test
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      # Providers are mocked in unit tests; no secrets are needed
+      - run: node node_modules/vitest/vitest.mjs run
+      - run: npm run build
+
+  whatsapp-connector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: connectors/whatsapp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: connectors/whatsapp/go.mod
+          cache-dependency-path: connectors/whatsapp/go.sum
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: docker build -t dt-whatsapp-connector .
