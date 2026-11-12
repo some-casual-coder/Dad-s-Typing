@@ -267,8 +267,14 @@ section { scroll-margin-top: 72px; }
 
 /* Closing */
 .close .wrap { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: clamp(24px, 5vw, 60px); padding-block: clamp(56px, 8vw, 110px); }
-.close-art { min-width: 0; }
-.close-art img { width: 100%; transform: scaleX(-1); }
+.close-art { min-width: 0; align-self: stretch; display: flex; }
+/* Flipped, so the raw right and bottom edges are the visible left and bottom: fade those */
+.close-art img { width: 100%; transform: scaleX(-1);
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 16%), linear-gradient(to top, transparent, #000 16%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to left, transparent, #000 16%), linear-gradient(to top, transparent, #000 16%);
+  mask-composite: intersect; }
+@media (min-width: 861px) { .close-art img { height: 100%; object-fit: cover; object-position: right bottom; } }
 .close h2 { font-size: clamp(2.4rem, 5.4vw, 4.2rem); }
 .close .say { font: italic 600 clamp(1.8rem, 3vw, 2.4rem)/1.1 var(--display); color: var(--coral); }
 @media (max-width: 860px) { .close .wrap { grid-template-columns: 1fr; } }
@@ -527,7 +533,7 @@ npm run build &amp;&amp; npx next start -p 3000</pre></div>
 
   <section class="close" aria-labelledby="close-h">
     <div class="wrap">
-      <div class="close-art" data-speed="-0.05">
+      <div class="close-art">
         <img src="img/dad-typing.webp" width="1400" height="788" loading="lazy" alt="Dad looks closely at his phone beside a three-dot typing bubble.">
       </div>
       <div class="hero-copy">
