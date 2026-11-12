@@ -69,8 +69,8 @@ export function ShareMenu({ taskId, token, roles, stage }: { taskId: string; tok
           hint="They see the exact total and pay in PayPal. They can't change the choice." />
         {stage !== "pay" && (
           <details className="more"><summary>More ways</summary>
-            <ShareInvite taskId={taskId} token={token} roles={["helper"]} label="Helper" buttonText="Make a helper link"
-              hint="A helper can chat and suggest details, but can't choose or pay." />
+            <ShareInvite taskId={taskId} token={token} roles={["helper"]} label="Family" buttonText="Send a link to chat and suggest"
+              hint="They can chat and suggest details, but can't choose or pay." />
           </details>
         )}
       </div>

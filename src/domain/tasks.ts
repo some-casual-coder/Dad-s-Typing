@@ -230,6 +230,13 @@ export async function previewOrder(taskId: string, token: string) {
   const existing = (await pool.query(`SELECT * FROM seller_orders WHERE selection_id=$1 AND kind <> 'topup'`, [s.id])).rows[0];
   if (existing) return { selectionId: s.id as string, order: orderView(existing) };
   const snap = s.offer_snapshot;
+  // The price or stock moved since the choice: the old review can't authorise it
+  const live = (await pool.query(`SELECT unit_price_minor, shipping_minor, currency, availability FROM offers WHERE id=$1`, [s.offer_id])).rows[0];
+  if (!quoteUnchanged(snap, live)) {
+    const to = live && live.availability === "InStock" && live.currency === snap.currency
+      ? (snap.route === "paypal" && Number.isInteger(live.shipping_minor) ? orderTotal(live.unit_price_minor, live.shipping_minor) : live.unit_price_minor) : null;
+    return { selectionId: s.id as string, changed: { offerId: s.offer_id as string, currency: snap.currency as string, toMinor: to as number | null } };
+  }
   if (snap.route === "paypal") {
     if (!Number.isInteger(snap.unitPriceMinor) || !Number.isInteger(snap.shippingMinor)) throw new DomainError("not_payable", "Delivery or price not confirmed");
     return { selectionId: s.id as string, quote: { kind: "merchant" as const, title: snap.title as string, seller: snap.seller as string, currency: snap.currency as string,

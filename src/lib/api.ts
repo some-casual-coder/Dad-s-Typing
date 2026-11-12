@@ -32,6 +32,7 @@ export interface SharedSource {
 }
 export interface OrderPreview {
   selectionId: string;
+  changed?: { offerId: string; currency: string; toMinor: number | null };
   order?: OrderView;
   quote?: {
     kind: "merchant" | "concierge"; title: string; seller: string; currency: string; totalMinor: number;

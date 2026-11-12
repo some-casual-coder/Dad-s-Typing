@@ -10,7 +10,8 @@ const view = (m: Row) => {
   return {
     id: m.id as string,
     role: assistant ? ("assistant" as const) : ("user" as const),
-    author: assistant ? "Assistant" : ((m.label as string) || (m.roles as string[] | null)?.[0] || "Someone"),
+    // People see a name, never an internal role
+    author: assistant ? "Assistant" : (m.label as string) || "Shopper",
     body: m.body as string,
     hasImage: m.media_ref != null,
     createdAt: m.created_at as string,

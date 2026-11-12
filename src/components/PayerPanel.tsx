@@ -59,6 +59,7 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
     <section className="card stack pay" aria-labelledby="pay-h">
       <h2 id="pay-h">Pay <span className="tag">Sandbox</span></h2>
       <p><strong>{sel.title}</strong></p>
+      <p className="small">From {concierge ? "Dad's Typing concierge (sandbox)" : order?.seller ?? q?.seller ?? sel.seller} · Quantity 1</p>
       {concierge && <p className="small">We buy it through {(c?.provider ?? q?.provider) === "aquantuo" ? "Aquantuo" : "Kentex"} and deliver it to you in Kenya.</p>}
       {arrival && <p>Arrives {arrival} <span className="muted small">(estimate)</span></p>}
       {total ? (
@@ -70,8 +71,20 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
               {" "}{c?.rule ?? q?.rule}</p>
           )}
         </>
-      ) : !err && <p role="status" className="muted">Working out the total...</p>}
+      ) : !err && !p?.changed && <p role="status" className="muted">Working out the total...</p>}
       {changed && <p className="note" role="alert">The total changed since you looked. Check the amount above, then tap Pay again.</p>}
+      {p?.changed && (
+        <div className="note stack" role="alert">
+          <p>{p.changed.toMinor !== null ? `The price changed since this was chosen. It's now ${formatMoney(p.changed.toMinor, p.changed.currency)}.` : "This item is no longer available at that price or is out of stock."}</p>
+          {p.changed.toMinor !== null && (
+            <button className="btn" disabled={busy} onClick={async () => {
+              setBusy(true); setErr("");
+              try { await api.select(taskId, token, p.changed!.offerId, view.version); setChanged(false); onChanged(); }
+              catch (e) { setErr(e instanceof Error ? e.message : "Could not update."); } finally { setBusy(false); }
+            }}>Review the new price</button>
+          )}
+        </div>
+      )}
       {lines && (
         <details className="more"><summary>What this covers</summary>
           <ul className="parts small">{lines.map((l, i) => (
@@ -81,7 +94,7 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
         </details>
       )}
       <p className="small"><strong>{concierge ? "Sandbox demonstration: no real order or shipment is booked." : "Sandbox: demo shop, no real money moves."}</strong> PayPal charges in US dollars.</p>
-      {total && (!order || order.status === "awaiting_payer" || order.status === "failed") && (
+      {total && !p?.changed && (!order || order.status === "awaiting_payer" || order.status === "failed") && (
         <button className="btn pay" disabled={busy} onClick={pay}>{busy ? "Opening PayPal..." : "Pay with PayPal (sandbox)"}</button>
       )}
       {order?.status === "pending" && (

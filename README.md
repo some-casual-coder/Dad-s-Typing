@@ -56,13 +56,15 @@ The server refuses to start PayPal unless `PAYPAL_ENV=sandbox`.
    as "For Mum. It must open from the top and be at least 45 cm long", then **Start with this photo**.
    You can also type a request and choose **Start for me** (or **Start for Mum** to send her a link to choose), or speak it with **Speak**.
 2. The assistant reads the photo and note and proposes requirements, each with the words it relied on.
-   Nothing is applied until a person confirms it.
-3. Choose **Send to Mum** and open the link in a **different browser profile** (a private window shares
-   no sign-in). As Mum, confirm the requirements: the shortlist changes, mismatches move to
-   "Doesn't match", and unverified external offers stay marked **Unverified**.
-4. Mum chooses an option. As the payer, review the exact item, seller and total, then
-   **Pay with PayPal (sandbox)** and sign in with a PayPal **Personal sandbox** buyer
-   (create one under Testing Tools > Sandbox Accounts in the PayPal developer dashboard).
+   Nothing is applied until a person confirms it. The page moves through **Find · Choose · Pay · Track**.
+3. Open **Share** and choose **Send to Mum to choose**, then open the link in a **different browser
+   profile** (a private window shares no sign-in). As Mum, confirm a requirement such as "it must open
+   from the top": the shortlist changes, mismatches move to **Doesn't match**, and offers that can't be
+   checked move to **Similar**.
+4. Mum taps **Choose this one**. The payer's page moves to **Pay** and shows the exact item, seller,
+   quantity and total; nothing is created until **Pay with PayPal (sandbox)** is tapped. Sign in with a
+   PayPal **Personal sandbox** buyer (create one under Testing Tools > Sandbox Accounts in the PayPal
+   developer dashboard).
 5. The server captures and verifies the payment; both views show the same receipt.
 
 Cancelling at PayPal leaves no receipt and the payment can be retried.

@@ -87,7 +87,7 @@ export function variantText(v: unknown): string {
 }
 
 // One status line per stage, in the viewer's terms; no role names
-export function stageCopy(stage: "find" | "choose" | "pay" | "track", a: NextAction, r: { canPay: boolean; canChoose: boolean }): { headline: string; detail: string } {
+export function stageCopy(stage: "find" | "choose" | "pay" | "track", a: NextAction, r: { canPay: boolean; canChoose: boolean; tracked?: boolean }): { headline: string; detail: string } {
   if (a === "cancelled") return { headline: "Cancelled", detail: "Nothing more will be charged." };
   switch (stage) {
     case "find": return r.canChoose ? { headline: "What are we finding?", detail: "Send a photo, a link or a few words." }
@@ -98,6 +98,6 @@ export function stageCopy(stage: "find" | "choose" | "pay" | "track", a: NextAct
       if (a === "checking_payment") return { headline: "Checking the payment", detail: "PayPal is confirming it. This can take a moment." };
       return r.canPay ? { headline: "Pay once", detail: "Check the total, then pay in PayPal (sandbox)." }
         : { headline: "Sent to be paid", detail: "You'll see the arrival date here once it's paid." };
-    case "track": return { headline: "Paid", detail: "Here's where it is and when it should arrive." };
+    case "track": return { headline: "Paid", detail: r.tracked ? "Here's where it is and when it should arrive." : "The seller delivers it. Your receipt is below." };
   }
 }

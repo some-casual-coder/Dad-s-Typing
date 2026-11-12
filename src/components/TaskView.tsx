@@ -103,7 +103,7 @@ export default function TaskPage({ taskId }: { taskId: string }) {
   const roles = view.viewer.roles;
   const stage = stageOf(view);
   const canPay = canDo(roles, "pay");
-  const copy = stageCopy(stage, view.nextAction, { canPay, canChoose: canDo(roles, "choose") });
+  const copy = stageCopy(stage, view.nextAction, { canPay, canChoose: canDo(roles, "choose"), tracked: !!view.fulfilment });
   const sel = view.selection;
   const extOffer = sel?.route === "external"
     ? cmp?.offers.find((o) => o.route === "external" && o.title === sel.title && o.seller === sel.seller) : undefined;
@@ -192,9 +192,9 @@ export default function TaskPage({ taskId }: { taskId: string }) {
           {view.fulfilment ? (
             <StatusTimeline taskId={taskId} token={token} f={view.fulfilment} onChanged={load}
               extra={canPay ? <TopupPay taskId={taskId} token={token} view={view} /> : null} />
-          ) : view.nextAction === "paid" && <section className="card stack"><h2>Paid</h2><p>The seller delivers it; the receipt is below.</p></section>}
+          ) : null}
           {view.receipt && (
-            <details className="card more receipt">
+            <details className="card more receipt" open={!view.fulfilment}>
               <summary>Receipt · {formatMoney(view.receipt.totalMinor, view.receipt.currency)} paid</summary>
               <dl className="facts">
                 <dt>Seller</dt><dd>{view.receipt.seller}</dd>

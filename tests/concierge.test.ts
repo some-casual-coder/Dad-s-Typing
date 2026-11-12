@@ -231,3 +231,22 @@ describe("pay: read-only preview, order only on Pay, amount must match", () => {
     await expect(previewOrder(me.taskId, mum.token)).rejects.toMatchObject({ code: "forbidden" });
   });
 });
+
+describe("pay: a price change after the choice needs a fresh review", () => {
+  it("preview reports the new total and Pay with the old one is refused", async () => {
+    gate.payments = mk();
+    const { previewOrder } = await import("@/domain/tasks");
+    const me = await createTask({ title: "Carrier", starterRoles: ["requester", "chooser", "payer"], starterLabel: "Me" });
+    await recordOffers(me.taskId, [{ source: "demo", sourceOfferId: `QC-${key()}`, route: "paypal", seller: "Demo", merchantId: "MERCH1", sku: "QC-1", title: "Carrier A",
+      unitPriceMinor: 4900, shippingMinor: 500, currency: "USD", availability: "InStock" }]);
+    const cmp = await getComparison(me.taskId, me.token);
+    const sel = await selectOffer(me.taskId, me.token, { offerId: cmp.offers[0].id, expectedVersion: cmp.version }, { idempotencyKey: key() });
+    expect((await previewOrder(me.taskId, me.token)).quote!.totalMinor).toBe(5400);
+    await pool.query(`UPDATE offers SET unit_price_minor=5200 WHERE id=$1`, [cmp.offers[0].id]);
+    expect((await previewOrder(me.taskId, me.token)).changed).toEqual({ offerId: cmp.offers[0].id, currency: "USD", toMinor: 5700 });
+    await expect(createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId, expectedTotalMinor: 5400 })).rejects.toMatchObject({ code: "stale" });
+    const again = await selectOffer(me.taskId, me.token, { offerId: cmp.offers[0].id, expectedVersion: (await getComparison(me.taskId, me.token)).version }, { idempotencyKey: key() });
+    expect((await previewOrder(me.taskId, me.token)).quote!.totalMinor).toBe(5700);
+    expect((await createSellerOrder(me.taskId, me.token, { selectionId: again.selectionId, expectedTotalMinor: 5700 })).totalMinor).toBe(5700);
+  });
+});
