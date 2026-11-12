@@ -155,8 +155,9 @@ func run(log *slog.Logger) error {
 	} else if n > 0 {
 		log.Warn("interrupted sends marked unknown", "count", n)
 	}
+	// Phone-number pairing only accepts a "Browser (OS)" display name (400 bad-request otherwise); same value Bunema pairs with
 	tr, err := transport.NewWA(ctx, store.DSN(filepath.Join(cfg.DataDir, "session.db")),
-		os.Getenv("WHATSMEOW_LOG_LEVEL"), "Dad's Typing", log)
+		os.Getenv("WHATSMEOW_LOG_LEVEL"), "Chrome (macOS)", log)
 	if err != nil {
 		return err
 	}
