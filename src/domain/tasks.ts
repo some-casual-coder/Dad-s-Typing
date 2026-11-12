@@ -92,10 +92,11 @@ export async function setRequirement(taskId: string, token: string, input: Requi
     const g = await authorize(c, taskId, token, "propose_requirement");
     return idempotent(c, g.id, opts.idempotencyKey, "setRequirement", { taskId, input }, async () => {
       if (!input.key || input.value === undefined || input.value === "") throw new DomainError("invalid", "Requirement needs key and value");
+      await assertNotPaid(c, taskId);
       const confirmed = can(g.roles, "confirm_requirement");
       const id = randomUUID();
       if (confirmed) {
-        await c.query(`UPDATE requirements SET superseded_at=now() WHERE task_id=$1 AND key=$2 AND superseded_at IS NULL AND status='confirmed'`, [taskId, input.key]);
+        await c.query(`UPDATE requirements SET superseded_at=now() WHERE task_id=$1 AND key=$2 AND op=$3 AND superseded_at IS NULL AND status='confirmed'`, [taskId, input.key, input.op ?? "eq"]);
       }
       await c.query(
         `INSERT INTO requirements (id,task_id,key,op,value,unit,essential,status,proposed_by,confirmed_by,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
@@ -112,9 +113,11 @@ export async function setRequirement(taskId: string, token: string, input: Requi
 export async function confirmRequirement(taskId: string, token: string, requirementId: string) {
   return tx(async (c) => {
     const g = await authorize(c, taskId, token, "confirm_requirement");
-    const { rows } = await c.query(`SELECT key FROM requirements WHERE id=$1 AND task_id=$2 AND status='proposed' AND superseded_at IS NULL FOR UPDATE`, [requirementId, taskId]);
+    const { rows } = await c.query(`SELECT key, op FROM requirements WHERE id=$1 AND task_id=$2 AND status='proposed' AND superseded_at IS NULL FOR UPDATE`, [requirementId, taskId]);
     if (!rows[0]) throw new DomainError("not_found", "No such proposed requirement");
-    await c.query(`UPDATE requirements SET superseded_at=now() WHERE task_id=$1 AND key=$2 AND status='confirmed' AND superseded_at IS NULL`, [taskId, rows[0].key]);
+    await assertNotPaid(c, taskId);
+    // "not front" sits beside "opens from the top"; only the same kind of rule is replaced
+    await c.query(`UPDATE requirements SET superseded_at=now() WHERE task_id=$1 AND key=$2 AND op=$3 AND status='confirmed' AND superseded_at IS NULL`, [taskId, rows[0].key, rows[0].op]);
     await c.query(`UPDATE requirements SET status='confirmed', confirmed_by=$2 WHERE id=$1`, [requirementId, g.id]);
     const version = await bump(c, taskId);
     await logEvent(c, taskId, g.id, "requirement.confirmed", { requirementId });
@@ -171,6 +174,12 @@ export async function getComparison(taskId: string, token: string) {
     offers.sort((a, b) => rank[a.status as keyof typeof rank] - rank[b.status as keyof typeof rank] || pay(a.route) - pay(b.route));
     return { version: t.version as number, requirements: reqs, offers };
   });
+}
+
+// What was bought stays what was asked for: a correction after payment is a new task
+async function assertNotPaid(c: Tx, taskId: string) {
+  if ((await c.query(`SELECT 1 FROM seller_orders WHERE task_id=$1 AND status='paid' AND kind <> 'topup'`, [taskId])).rowCount)
+    throw new DomainError("conflict", "This order is paid, so what it needed can't change. Start a new task for something different.");
 }
 
 // A new choice cancels unpaid orders; a payment already being captured blocks it

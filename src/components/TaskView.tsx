@@ -108,22 +108,24 @@ export default function TaskPage({ taskId }: { taskId: string }) {
   const extOffer = sel?.route === "external"
     ? cmp?.offers.find((o) => o.route === "external" && o.title === sel.title && o.seller === sel.seller) : undefined;
   const chooseOn = canDo(roles, "choose") && !view.order && view.nextAction !== "cancelled" && view.nextAction !== "paid";
+  // Once paid or cancelled, what it needed is part of the record, not a choice
+  const confirmOn = canDo(roles, "confirm_requirement") && stage !== "track";
   const lastSaid = [...messages].reverse().find((m) => m.role === "assistant")?.body ?? "";
 
   const chat = (bare: boolean) => (
-    <Chat taskId={taskId} token={token} messages={messages} serverProposals={serverProposals} canSend={canDo(roles, "message")}
-      canConfirm={canDo(roles, "confirm_requirement")} onChanged={load} bare={bare}
+    <Chat taskId={taskId} token={token} messages={messages} serverProposals={stage === "track" ? [] : serverProposals} canSend={canDo(roles, "message")}
+      canConfirm={confirmOn} onChanged={load} bare={bare}
       onSent={(m) => setMessages((old) => mergeMsgs(old, m))} />
   );
   // After Find the conversation steps back to one bar; a pending question opens it
   const chatBar = (
-    <details className="card chatbar" open={serverProposals.length > 0}>
+    <details className="card chatbar" open={confirmOn && serverProposals.length > 0}>
       <summary>{canDo(roles, "message") ? "Ask or change something" : `Conversation (${messages.length})`}
         {lastSaid && <span className="last">{lastSaid}</span>}</summary>
       {chat(true)}
     </details>
   );
-  const must = <MustHave reqs={view.requirements} canConfirm={canDo(roles, "confirm_requirement")} onConfirm={confirmReq} />;
+  const must = <MustHave reqs={view.requirements} canConfirm={confirmOn} onConfirm={confirmReq} />;
   const cards = cmp && (
     <DeliveredCards taskId={taskId} token={token} refreshKey={cmp.version * 1000 + cmp.offers.length} canEdit={canDo(roles, "message")} canChoose={chooseOn}
       busy={choosing} excluded={cmp.offers.filter((o) => o.status === "ineligible")}

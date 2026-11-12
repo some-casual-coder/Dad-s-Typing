@@ -335,3 +335,36 @@ describe("a changed choice and payments", () => {
     await expect(beginAttempt(f.taskId, f.nathan, f.order.id)).rejects.toMatchObject({ code: "stale" });
   });
 });
+
+describe("requirements keep the decisive one and freeze once paid", () => {
+  it("a compatible 'not front' preference sits beside 'opens from the top', not in its place", async () => {
+    const s = await scenario();
+    await setRequirement(s.taskId, s.mum, { key: "opening", value: "top" }, { idempotencyKey: key() });
+    await setRequirement(s.taskId, s.nathan, { key: "opening", op: "neq", value: "front", essential: false }, { idempotencyKey: key() });
+    const proposed = (await getTaskView(s.taskId, s.mum)).requirements.find((r) => r.status === "proposed")!;
+    await confirmRequirement(s.taskId, s.mum, proposed.id);
+    const reqs = (await getTaskView(s.taskId, s.mum)).requirements.filter((r) => r.status === "confirmed");
+    expect(reqs.map((r) => [r.op, r.value, r.essential])).toEqual([["eq", "top", true], ["neq", "front", false]]);
+    // a real correction of the same kind still replaces it
+    await setRequirement(s.taskId, s.mum, { key: "opening", value: "front" }, { idempotencyKey: key() });
+    const after = (await getTaskView(s.taskId, s.mum)).requirements.filter((r) => r.status === "confirmed").map((r) => [r.op, r.value]);
+    expect(after).toEqual([["neq", "front"], ["eq", "front"]]);
+  });
+
+  it("a paid task's requirements cannot be changed or confirmed", async () => {
+    const s = await scenario();
+    await setRequirement(s.taskId, s.mum, { key: "opening", value: "top" }, { idempotencyKey: key() });
+    const cmp = await getComparison(s.taskId, s.mum);
+    const sel = await selectOffer(s.taskId, s.mum, { offerId: cmp.offers.find((o) => o.sku === "TOP-1")!.id, expectedVersion: cmp.version }, { idempotencyKey: key() });
+    const order = await createSellerOrder(s.taskId, s.nathan, { selectionId: sel.selectionId });
+    const att = await beginAttempt(s.taskId, s.nathan, order.id);
+    await recordProviderOrder(att.id, "PP-FROZEN-1");
+    await settleCapture(att.id, { paypalOrderId: "PP-FROZEN-1", captureId: "CAPFROZEN01", status: "COMPLETED", amountMinor: 4399, currency: "USD", payeeMerchantId: "MERCH1" });
+    await setRequirement(s.taskId, s.nathan, { key: "opening", op: "neq", value: "front", essential: false }, { idempotencyKey: key() }).catch(() => null);
+    await expect(setRequirement(s.taskId, s.mum, { key: "opening", value: "front" }, { idempotencyKey: key() })).rejects.toMatchObject({ code: "conflict" });
+    const v = await getTaskView(s.taskId, s.mum);
+    expect(v.requirements.filter((r) => r.status === "confirmed").map((r) => r.value)).toEqual(["top"]);
+    const proposed = v.requirements.find((r) => r.status === "proposed");
+    if (proposed) await expect(confirmRequirement(s.taskId, s.mum, proposed.id)).rejects.toMatchObject({ code: "conflict" });
+  });
+});
