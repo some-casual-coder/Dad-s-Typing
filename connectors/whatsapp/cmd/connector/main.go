@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -60,6 +63,44 @@ func healthz() int {
 	return 0
 }
 
+// admin is a loopback client for a shell without curl, e.g. on a hosted
+// container: connector admin GET /status | POST /pair '{"phone":"2547..."}'
+func adminCLI(args []string) int {
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: connector admin <GET|POST> <path> [json]")
+		return 2
+	}
+	addr := os.Getenv("ADMIN_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8091"
+	}
+	var body io.Reader
+	if len(args) > 2 {
+		body = strings.NewReader(args[2])
+	}
+	req, err := http.NewRequest(strings.ToUpper(args[0]), "http://"+addr+args[1], body)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bad request")
+		return 2
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("ADMIN_TOKEN"))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "connector not reachable on", addr)
+		return 1
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	fmt.Printf("%d %s\n", resp.StatusCode, out)
+	if resp.StatusCode >= 300 {
+		return 1
+	}
+	return 0
+}
+
 func purgeLoop(ctx context.Context, st *store.Store, log *slog.Logger) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
@@ -81,6 +122,9 @@ func purgeLoop(ctx context.Context, st *store.Store, log *slog.Logger) {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthz" {
 		os.Exit(healthz())
+	}
+	if len(os.Args) > 1 && os.Args[1] == "admin" {
+		os.Exit(adminCLI(os.Args[2:]))
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	if err := run(log); err != nil {

@@ -48,6 +48,9 @@ Admin routes (all need the bearer): `GET /healthz` (200 only when connected,
 paired and not halted), `GET /status` (includes `failedInbox`), `POST /pair`,
 `POST /pair/qr`, `GET /pair/qr`, `POST /logout`.
 
+In a container without curl, call them with the binary itself:
+`connector admin GET /status`, `connector admin POST /pair '{"phone":"2547XXXXXXXX"}'`.
+
 ## Restart and persistence
 
 The session lives in `DATA_DIR/session.db` and is reused on restart; no
