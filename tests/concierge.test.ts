@@ -196,4 +196,14 @@ describe("one payment for an import (option B, sandbox)", () => {
     const sel = await selectOffer(me.taskId, me.token, { offerId: cmp.offers[0].id, expectedVersion: cmp.version }, { idempotencyKey: key() });
     await expect(createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId })).rejects.toMatchObject({ code: "not_payable" });
   });
+
+  it("an item that needs Kentex's review cannot be paid in one step", async () => {
+    gate.payments = mk();
+    const me = await createTask({ title: "Vitamins", starterRoles: ["requester", "chooser", "payer"], starterLabel: "Me" });
+    await recordOffers(me.taskId, [{ source: "channel3", sourceOfferId: `V-${key()}`, route: "external", seller: "amazon.com", title: "Vitamin D3 supplement",
+      unitPriceMinor: 2000, currency: "USD", availability: "InStock", url: "https://www.amazon.com/dp/B012345678", specs }]);
+    const cmp = await getComparison(me.taskId, me.token);
+    const sel = await selectOffer(me.taskId, me.token, { offerId: cmp.offers[0].id, expectedVersion: cmp.version }, { idempotencyKey: key() });
+    await expect(createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId })).rejects.toMatchObject({ code: "not_payable" });
+  });
 });

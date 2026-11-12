@@ -33,7 +33,11 @@ export const RULES = {
     ukAirUsdPerKgMinor: 1400,
     buyForMeFeePct: 7.5,
     customs: "unknown" as const,
-    customsNote: "Aquantuo says it handles customs; whether the Kenya rate includes duties and VAT is unconfirmed.",
+    customsNote: "UK route: whether Aquantuo's rate includes Kenyan duties and VAT is unconfirmed.",
+    // US route FAQ (aquantuo.com/faq/price-change-in-kenya, per Nathan, N):
+    // rate covers freight, handling, clearance; Aquantuo pays Kenyan import taxes
+    usCustoms: "included" as const,
+    usCustomsNote: "Aquantuo's US to Kenya FAQ says the rate covers freight, handling and customs clearance, and that it pays the Kenyan import taxes for you.",
   },
   // Our model, not a provider fee: Kentex publishes no door fee. Range
   // from Nairobi courier list prices (base about KSh 250 plus per kg).

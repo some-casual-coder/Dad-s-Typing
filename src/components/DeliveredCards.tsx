@@ -72,7 +72,7 @@ function CardView({ c, plans, canChoose, busy, onChoose, quote }: { c: Card; pla
         </div>
       </div>
       {c.winner && <p className="badge eligible">Best delivered price</p>}
-      <p className="price">{c.price ?? "Delivery cost not confirmed"}</p>
+      <p className="price">{c.price ?? (plan.availability === "needs_quote" ? "Quote required" : "Delivery cost not confirmed")}</p>
       {c.arrival && <p>Arrives {c.arrival}</p>}
       <p className="small">{c.difference}</p>
       {canChoose && (
@@ -113,6 +113,10 @@ export default function DeliveredCards({ taskId, token, refreshKey, canEdit, can
       {closest.length > 0 && <><h3>Closest match</h3>{list(closest)}</>}
       {similar.length > 0 && <><h3>Similar</h3>{list(similar)}</>}
       {more.length > 0 && <details className="more"><summary>More options ({more.length})</summary>{list(more)}</details>}
+      {v.cards.blocked.length > 0 && (
+        <details className="more"><summary>Can&apos;t be flown to Kenya ({v.cards.blocked.length})</summary>
+          <ul className="small">{v.cards.blocked.map((b, i) => <li key={i}>{b.title}: {b.reason}</li>)}</ul></details>
+      )}
       {excluded.length > 0 && (
         <details className="more"><summary>Doesn&apos;t match what you need ({excluded.length})</summary>
           <ul className="small">{excluded.map((o) => <li key={o.id}>{o.title} · {o.seller}</li>)}</ul></details>

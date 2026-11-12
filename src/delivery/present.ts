@@ -7,11 +7,13 @@ import type { Plan } from "./types";
 export interface Card {
   planId: string; offerId: string; title: string; seller: string; imageUrl: string | null;
   price: string | null; arrival: string | null; difference: string; method: string; provider: string;
-  confidence: Plan["confidence"]; complete: boolean; winner: boolean; closest: boolean;
+  confidence: Plan["confidence"]; complete: boolean; winner: boolean; closest: boolean; quoteRequired: boolean;
   // Other ways to get the same listing, for "other ways"
   others: string[];
 }
-export interface Cards { closest: Card[]; similar: Card[]; more: Card[]; recommendation: string | null }
+export interface Cards { closest: Card[]; similar: Card[]; more: Card[]; recommendation: string | null;
+  // Listings no route can take, with the rule that stopped them
+  blocked: { title: string; reason: string }[] }
 
 const MAX_SHOWN = 3;
 const roundKes = (minor: number) => Math.round(minor / 10_000) * 100;
@@ -27,6 +29,8 @@ export function priceText(kes: Plan["kes"]): string | null {
 const day = (iso: string) => new Date(`${iso}T00:00:00Z`).getTime() / 86_400_000;
 
 export function difference(p: Plan, ref: Plan | null): string {
+  if (p.provider === "demo") return "Demo inventory for the sandbox, not a verified Kenyan shop.";
+  if (p.availability === "needs_quote" && p.route === "forward") return p.why;
   if (!p.complete) return "Delivery cost to Kenya is not confirmed yet.";
   if (!ref || ref.id === p.id) return p.exact ? "Closest to what you sent." : "Similar to what you sent.";
   const bits: string[] = [];
@@ -66,11 +70,16 @@ export function present(plans: Plan[], cheapestId: string | null): Cards {
     planId: p.id, offerId: p.offerId, title: p.item.title, seller: p.item.seller, imageUrl: p.item.imageUrl,
     price: p.complete ? priceText(p.kes) : null, arrival: p.eta ? formatRange(p.eta.earliest, p.eta.latest) : null,
     difference: difference(p, ref), method: p.title, provider: p.provider, confidence: p.confidence, complete: p.complete,
-    winner: p.id === cheapestId, closest: p.exact,
+    winner: p.id === cheapestId, closest: p.exact, quoteRequired: p.availability === "needs_quote",
     others: (byOffer.get(p.offerId) ?? []).filter((x) => x.id !== p.id && x.availability === "available").map((x) => x.id),
   });
   const shownC = closest.slice(0, MAX_SHOWN), shownS = similar.slice(0, MAX_SHOWN);
+  const blocked = [...new Set(plans.map((p) => p.offerId))].filter((id) => !byOffer.has(id)).map((id) => {
+    const p = plans.find((x) => x.offerId === id)!;
+    return { title: p.item.title, reason: p.why };
+  });
   return {
+    blocked,
     closest: shownC.map(card), similar: shownS.map(card),
     more: [...closest.slice(MAX_SHOWN), ...similar.slice(MAX_SHOWN)].map(card),
     recommendation: recommend(shownC, shownS, cheapestId),

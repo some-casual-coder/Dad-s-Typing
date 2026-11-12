@@ -13,7 +13,7 @@ export function menuCards(c: Cards, max: number): Card[] {
 export function renderOptions(cards: Card[], head: string, compact: boolean): string {
   if (!cards.length) return "";
   const lines = cards.map((c, i) => {
-    const price = c.price ? c.price.replace(/^about /, "") : "delivery cost not confirmed";
+    const price = c.price ? c.price.replace(/^about /, "") : c.quoteRequired ? "quote required" : "delivery cost not confirmed";
     const date = c.arrival ? `, arrives ${shortDates(c.arrival)}` : "";
     const note = compact ? "" : ` ${c.winner ? "Best delivered price." : c.difference}`;
     const demo = c.provider === "demo" ? " (demo seller)" : "";

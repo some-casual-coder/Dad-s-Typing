@@ -1,5 +1,5 @@
 import { toKes, type FxTable } from "./fx";
-import { AQUANTUO_CM3_PER_KG, chargeableKg, KENTEX_CM3_PER_KG, type ParcelEstimate } from "./packaging";
+import { AQUANTUO_CM3_PER_KG, AQUANTUO_CM3_PER_KG_LOW, chargeableKg, KENTEX_CM3_PER_KG, type ParcelEstimate } from "./packaging";
 import { comp, RULES } from "./rules";
 import type { Component, Handling } from "./types";
 
@@ -15,7 +15,7 @@ export function freight(provider: "aquantuo" | "kentex", p: ParcelEstimate, lane
   const uk = provider === "aquantuo" && lane === "uk";
   const rate = uk ? RULES.aquantuo.ukAirUsdPerKgMinor : RULES[provider].airUsdPerKgMinor;
   const div = provider === "kentex" ? KENTEX_CM3_PER_KG : AQUANTUO_CM3_PER_KG;
-  const lo = chargeableKg(p.low, div), hi = chargeableKg(p.high, div);
+  const lo = chargeableKg(p.low, provider === "kentex" ? div : AQUANTUO_CM3_PER_KG_LOW), hi = chargeableKg(p.high, div);
   let low = Math.round(lo * rate), high = Math.round(hi * rate);
   const notes = [`${kg(lo)} to ${kg(hi)} billed weight. ${p.note}`];
   if (provider === "kentex") {
@@ -23,7 +23,7 @@ export function freight(provider: "aquantuo" | "kentex", p: ParcelEstimate, lane
     low = Math.max(low, hub === "delaware" ? m.delaware : m.texas);
     high = Math.max(high, hub === "texas" ? m.texas : m.delaware);
     if (hub === "unknown") notes.push("Minimum is $50 from Texas or $100 from Delaware; we assume the higher until the warehouse is known.");
-  } else notes.push(`Aquantuo's volume divisor is not published; 5,000 cm3 per kg assumed.`);
+  } else notes.push("Aquantuo's pages give two volume divisors (6,000 and 5,000 cm3 per kg); the range covers both until Aquantuo confirms.");
   return comp({ key: "freight", label: "Air freight to Kenya", status: "estimated", currency: "USD", minor: low, highMinor: Math.max(low, high),
     confidence: p.confidence, note: notes.join(" "), source: uk ? RULES.aquantuo.ukSource : RULES[provider].source });
 }
@@ -51,9 +51,11 @@ export function kentexInsurance(itemMinor: number, source: string): Component {
     note: "Optional at $200 or less (5% of the item price).", source });
 }
 
-export const customs = (provider: "aquantuo" | "kentex"): Component =>
-  comp({ key: "customs", label: "Customs and import tax", status: RULES[provider].customs, currency: "USD",
-    confidence: provider === "kentex" ? "medium" : undefined, note: RULES[provider].customsNote, source: RULES[provider].source });
+export const customs = (provider: "aquantuo" | "kentex", lane: "us" | "uk" = "us"): Component => provider === "aquantuo" && lane === "us"
+  ? comp({ key: "customs", label: "Customs and import tax", status: RULES.aquantuo.usCustoms, currency: "USD", confidence: "medium",
+      note: RULES.aquantuo.usCustomsNote, source: "aquantuo.com/faq/price-change-in-kenya, per Nathan 2026-11-12 (N)" })
+  : comp({ key: "customs", label: "Customs and import tax", status: RULES[provider].customs, currency: "USD",
+      confidence: provider === "kentex" ? "medium" : undefined, note: RULES[provider].customsNote, source: RULES[provider].source });
 
 export function kenyaDelivery(provider: "aquantuo" | "kentex", handling: Handling, p: ParcelEstimate): Component {
   if (provider === "aquantuo")

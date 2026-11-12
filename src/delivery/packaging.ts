@@ -93,5 +93,7 @@ export function chargeableKg(b: Box, cm3PerKg: number): number {
 }
 
 export const KENTEX_CM3_PER_KG = 306 * CM3_PER_IN3;
-// Industry norm, not published by Aquantuo: a hypothesis
+// Aquantuo's own pages disagree (calculator 6,000, guide 5,000): the range uses
+// 6,000 for its low end and 5,000 for its high end
 export const AQUANTUO_CM3_PER_KG = 5000;
+export const AQUANTUO_CM3_PER_KG_LOW = 6000;

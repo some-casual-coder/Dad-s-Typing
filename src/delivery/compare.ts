@@ -3,6 +3,7 @@ import { estimateArrival, type Area, type Lane } from "./eta";
 import type { FxTable } from "./fx";
 import { handoffFor } from "./handoff";
 import { estimateParcel, type ParcelEstimate } from "./packaging";
+import { checkItem } from "./restricted";
 import { comp, RULES, RULES_AS_OF } from "./rules";
 import type { Component, Destination, ImportedQuote, Mode, OfferInput, Parcel, Plan, Prefs, Provider, RouteKind } from "./types";
 
@@ -90,7 +91,16 @@ function drafts(i: Inputs): Draft[] {
     }
     const us = o.currency === "USD", uk = o.currency === "GBP";
     const p = estimateParcel(o, measured(i.parcel));
-    const add = (d: Omit<Draft, "offer" | "parcel">) => out.push({ ...d, offer: o, parcel: p });
+    const chk = checkItem({ title: o.title, category: o.specs?.category });
+    // Fixed rules decide what can fly; a review or a quote blocks one-step payment
+    const add = (d: Omit<Draft, "offer" | "parcel">) => {
+      let { availability, why } = d;
+      if (chk.verdict === "prohibited" || chk.verdict === "no_air") { availability = "ineligible"; why = chk.reason; }
+      else if (chk.verdict === "review" && d.route === "forward") { availability = "needs_quote"; why = `Needs Kentex's confirmation first. ${chk.reason}`; }
+      else if (d.provider === "aquantuo") { availability = "needs_quote"; why = `Quote required. ${d.why} Aquantuo's billing weight rule is unconfirmed (its pages give 5,000 and 6,000).`; }
+      else if (chk.verdict === "declare" && d.route === "forward") why = `${d.why} ${chk.reason}`;
+      out.push({ ...d, availability, why, offer: o, parcel: p });
+    };
     const amazon = us && amazonUsListing(o.url);
 
     if (amazon) add({ route: "forward", provider: "kentex", mode: "amazon_buy_ship", availability: "available", primary: true,
@@ -104,7 +114,7 @@ function drafts(i: Inputs): Draft[] {
     if (us || uk) add({ route: "forward", provider: "aquantuo", mode: "buy_for_me", availability: "available", primary: uk,
       why: uk ? "Aquantuo buys it from the UK store and flies it to Kenya." : "Aquantuo buys it from the US store and flies it to Kenya.",
       parts: [itemPart(o), fee("Aquantuo Buy For Me fee", o.priceMinor, o.currency, RULES.aquantuo.buyForMeFeePct, RULES.aquantuo.source, "7.5% of the item price (search summary)."),
-        freight("aquantuo", p, uk ? "uk" : "us"), customs("aquantuo"), kenyaDelivery("aquantuo", h, p)] });
+        freight("aquantuo", p, uk ? "uk" : "us"), customs("aquantuo", uk ? "uk" : "us"), kenyaDelivery("aquantuo", h, p)] });
     if (us) add({ route: "forward", provider: "kentex", mode: "forwarding", availability: "available", primary: false,
       why: "You buy it yourself and ship it to your Kentex US address.",
       parts: [itemPart(o), domestic(o), freight("kentex", p, "us"), kentexInsurance(o.priceMinor, RULES.kentex.source), customs("kentex"), kenyaDelivery("kentex", h, p)] });

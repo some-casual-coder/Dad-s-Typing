@@ -354,3 +354,46 @@ describe("public holidays in arrival dates", () => {
     expect(addWorkingDays(new Date("2026-11-25T00:00:00Z"), 1, "us").toISOString().slice(0, 10)).toBe("2026-11-27");
   });
 });
+
+describe("what can fly (fixed rules, Kentex prohibited goods)", () => {
+  it("classifies titles without the model, including near misses", async () => {
+    const { checkItem } = await import("@/delivery/restricted");
+    const v = (title: string, category?: string[]) => checkItem({ title, category }).verdict;
+    expect(v("Anker 20000mAh Power Bank")).toBe("no_air");
+    expect(v("Portable Charger 10000mAh")).toBe("no_air");
+    expect(v("Rust-Oleum Spray Paint")).toBe("prohibited");
+    expect(v("Sparkler Fireworks Pack")).toBe("prohibited");
+    expect(v("Airsoft rifle")).toBe("prohibited");
+    expect(v("Hot glue gun with 20 sticks")).toBe("ok");
+    expect(v("Theragun massage gun")).toBe("ok");
+    expect(v("Riedel wine glass set")).toBe("ok");
+    expect(v("Red wine 750ml")).toBe("review");
+    expect(v("Dior Sauvage Eau de Toilette 100 ml")).toBe("ok");
+    expect(v("Fragrance mist 1000ml refill")).toBe("no_air");
+    expect(v("Chanel No 5 perfume")).toBe("review");
+    expect(v("Vitamin D3 supplement 120 softgels")).toBe("review");
+    expect(v("Sony WH-1000XM5 wireless headphones")).toBe("declare");
+    expect(v("Sherpa cat carrier", ["pet-supplies"])).toBe("ok");
+  });
+
+  it("removes what cannot fly, holds what needs review, and says why", () => {
+    const pb = { ...amazon, id: "PB", title: "Anker Power Bank 20000mAh" };
+    const ps = buildPlans(base({ offers: [pb, { ...amazon, id: "V", title: "Vitamin C supplement" }, { ...amazon, id: "H", title: "Wireless headphones" }] }));
+    expect(ps.filter((p) => p.offerId === "PB" && p.route === "forward").every((p) => p.availability === "ineligible")).toBe(true);
+    expect(find(ps, "V", "kentex", "amazon_buy_ship").availability).toBe("needs_quote");
+    expect(find(ps, "V", "kentex", "amazon_buy_ship").why).toMatch(/^Needs Kentex's confirmation first\. Supplements/);
+    expect(find(ps, "H", "kentex", "amazon_buy_ship").why).toMatch(/we declare it to Kentex for you/);
+    const c = present(ps, cheapestDelivered(ps));
+    expect([...c.closest, ...c.similar, ...c.more].some((x) => x.offerId === "PB")).toBe(false);
+    expect(c.blocked).toEqual([{ title: "Anker Power Bank 20000mAh", reason: "Power banks and loose lithium batteries cannot go by air." }]);
+  });
+
+  it("Aquantuo: quote required, US customs included per its FAQ, both divisors in the range", () => {
+    const a = find(buildPlans(base({ offers: [other] })), "O", "aquantuo", "buy_for_me");
+    expect(a.availability).toBe("needs_quote");
+    expect(a.why).toMatch(/^Quote required\..*5,000 and 6,000/);
+    expect(a.components.find((x) => x.key === "customs")!.status).toBe("included");
+    expect(find(buildPlans(base({ offers: [uk] })), "U", "aquantuo", "buy_for_me").components.find((x) => x.key === "customs")!.status).toBe("unknown");
+    expect(cheapestDelivered([a])).toBeNull();
+  });
+});
