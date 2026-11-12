@@ -51,8 +51,20 @@ export async function readSigned(channel: string, req: Request): Promise<Record<
 
 // The request MAC uses the secret itself (the connector signs with it); every
 // other use gets its own HKDF subkey so purposes cannot be confused
-const subkey = (channel: string, purpose: "grant" | "sender" | "recipient") =>
+const subkey = (channel: string, purpose: "grant" | "sender" | "recipient" | "content") =>
   Buffer.from(hkdfSync("sha256", channelSecret(channel), "dt-channel-v1", `${channel}:${purpose}`, 32));
+
+// A connector account (a Page, a business account) scopes its people: the same
+// id on two accounts is two people. Ids never contain a space, so this splits back exactly.
+export const address = (account: string | undefined, sender: string) => (account ? `${account} ${sender}` : sender);
+export const splitAddress = (a: string): { account?: string; recipient: string } => {
+  const i = a.indexOf(" ");
+  return i < 0 ? { recipient: a } : { account: a.slice(0, i), recipient: a.slice(i + 1) };
+};
+
+// Tells a replay from a different message reusing its id, without keeping the text
+export const contentHash = (channel: string, content: string) =>
+  createHmac("sha256", subkey(channel, "content")).update(content).digest("hex");
 
 export const deriveChannelToken = (channel: string, grantId: string) =>
   createHmac("sha256", subkey(channel, "grant")).update(grantId).digest("base64url");

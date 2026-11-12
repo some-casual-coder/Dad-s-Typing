@@ -13,8 +13,8 @@ import { claimExternalSearch } from "@/domain/offers";
 import { createInvite, createSellerOrder, createTask, getComparison, selectOffer } from "@/domain/tasks";
 import { getTaskView } from "@/domain/view";
 import { findLinks, LABEL, withoutSocialLinks } from "@/sources/recognize";
-import { deriveChannelToken, senderHash } from "./bridge";
-import { admitted, handleJoinOrStop } from "./join";
+import { address, contentHash, deriveChannelToken, senderHash } from "./bridge";
+import { admitted, handleJoinOrStop, optedOut, optOut } from "./join";
 import { menuCards, renderChosen, renderOptions } from "./render";
 import { allowedSenders, channelIds, getChannel, isConfigured, type ChannelDef } from "./registry";
 
@@ -24,30 +24,62 @@ const CONSENT = "Photos and messages you send are read by an AI service to help 
 const SORRY = "Sorry, I could not process that message. Please send it again.";
 const MAX_IMAGE_B64 = Math.ceil(4 * 1024 * 1024 * 1.4);
 
+const ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const ATTACHMENT_ERRORS = new Set(["expired", "private", "unavailable", "unsupported", "too_large"]);
+const KINDS = new Set(["message", "status", "echo", "opt_out", "opt_in"]);
+const DELIVERY = new Set(["delivered", "read", "failed"]);
+
 export interface InboundInput {
-  providerMessageId: string; sender: string; text?: string;
+  kind: "message" | "status" | "echo" | "opt_out" | "opt_in";
+  // The connector's own account (a Page, a business account, a number):
+  // the same person id on two accounts is two separate people here
+  providerMessageId: string; sender: string; rawSender: string; text?: string;
   image?: { mime: string; base64: string }; receivedAt: string;
+  // The connector got an attachment it could not fetch or pass on
+  attachmentError?: string;
+  // A delivery or read receipt for one of our replies
+  status?: { refersTo: string; state: "delivered" | "read" | "failed" };
   // Mapped from a location pin; the coordinates themselves are dropped
   place?: { county: string; area: string } | "outside_kenya";
   // A shared contact card: only its display name, used as a label
   contactName?: string;
 }
 
+
 export function parseInbound(def: ChannelDef, b: Record<string, unknown>): InboundInput {
   const id = b.providerMessageId, sender = b.sender, text = b.text, image = b.image, at = b.receivedAt, loc = b.location, card = b.contact;
-  if (typeof id !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(id)) throw new DomainError("invalid", "providerMessageId");
-  if (typeof sender !== "string" || !def.sender.test(sender)) throw new DomainError("invalid", "sender");
+  const kind = (b.kind ?? "message") as InboundInput["kind"], account = b.account;
+  if (typeof kind !== "string" || !KINDS.has(kind)) throw new DomainError("invalid", "kind");
+  if (account !== undefined && (typeof account !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(account))) throw new DomainError("invalid", "account");
+  if (typeof id !== "string" || !ID.test(id)) throw new DomainError("invalid", "providerMessageId");
+  if (typeof sender !== "string" || !def.sender.test(sender) || /\s/.test(sender)) throw new DomainError("invalid", "sender");
   if (text !== undefined && (typeof text !== "string" || text.length > 4000)) throw new DomainError("invalid", "text");
   const when = typeof at === "string" ? new Date(at) : null;
   if (!when || Number.isNaN(when.getTime())) throw new DomainError("invalid", "receivedAt");
+  const base = { kind, providerMessageId: address(account as string | undefined, id), sender: address(account as string | undefined, sender), rawSender: sender, receivedAt: when.toISOString() };
+  if (kind === "status") {
+    const s = b.state, ref = b.refersTo;
+    if (typeof ref !== "string" || !ID.test(ref)) throw new DomainError("invalid", "refersTo");
+    if (typeof s !== "string" || !DELIVERY.has(s)) throw new DomainError("invalid", "state");
+    return { ...base, status: { refersTo: ref, state: s as "delivered" | "read" | "failed" } };
+  }
+  if (kind !== "message") return base;
   let img: InboundInput["image"];
+  let attachmentError: string | undefined;
+  if (b.attachment !== undefined) {
+    const e = (b.attachment as Record<string, unknown> | null)?.error;
+    if (typeof e !== "string" || !ATTACHMENT_ERRORS.has(e)) throw new DomainError("invalid", "attachment");
+    attachmentError = e;
+  }
   if (image !== undefined) {
     if (!def.images) throw new DomainError("invalid", "this channel does not accept images");
     const o = image as Record<string, unknown>;
-    if (typeof o !== "object" || o === null || typeof o.mime !== "string") throw new DomainError("invalid", "image mime");
-    if (typeof o.base64 !== "string" || o.base64.length > MAX_IMAGE_B64) throw new DomainError("invalid", "image data");
-    validateImage(o.mime, o.base64);
-    img = { mime: o.mime, base64: o.base64 };
+    if (typeof o !== "object" || o === null || typeof o.mime !== "string" || typeof o.base64 !== "string") throw new DomainError("invalid", "image");
+    // A photo we cannot use gets the same recovery step as one the connector could not fetch
+    if (o.base64.length > MAX_IMAGE_B64) attachmentError = "too_large";
+    else {
+      try { validateImage(o.mime, o.base64); img = { mime: o.mime, base64: o.base64 }; } catch { attachmentError = "unsupported"; }
+    }
   }
   let place: InboundInput["place"];
   if (loc !== undefined) {
@@ -62,22 +94,43 @@ export function parseInbound(def: ChannelDef, b: Record<string, unknown>): Inbou
     if (typeof name !== "string" || !name.trim()) throw new DomainError("invalid", "contact");
     contactName = name.replace(/[^\p{L}\p{N} .'-]/gu, "").trim().slice(0, 40) || "them";
   }
-  if (!text?.trim() && !img && !place && !contactName) throw new DomainError("invalid", "empty message");
-  return { providerMessageId: id, sender, text: text?.trim() || undefined, image: img, receivedAt: when.toISOString(),
+  if (!text?.trim() && !img && !place && !contactName && !attachmentError) throw new DomainError("invalid", "empty message");
+  return { ...base, text: text?.trim() || undefined, image: img, ...(attachmentError ? { attachmentError } : {}),
     ...(place ? { place } : {}), ...(contactName ? { contactName } : {}) };
 }
 
-// Persist first, process later: a restart or retry can never lose or repeat a message
-export async function enqueueInbound(channel: string, m: InboundInput): Promise<"accepted" | "duplicate" | "ignored"> {
-  if (!allowedSenders(channel).has(m.sender) && !(await admitted(channel, m.sender, m.text))) return "ignored";
+const RANK: Record<string, number> = { delivered: 1, read: 2, failed: 3 };
+
+// Persist first, process later: a restart or retry can never lose or repeat a message.
+// Receipts and our own echoed replies never become a shopping turn.
+export async function enqueueInbound(channel: string, m: InboundInput): Promise<"accepted" | "duplicate" | "conflict" | "ignored" | "recorded"> {
+  if (m.kind === "echo") return "ignored";
+  if (m.kind === "status") {
+    // Only moves forward; delivered or read is never a choice or a payment
+    await tx((c) => c.query(
+      `UPDATE channel_outbox SET delivery=$3, updated_at=now() WHERE channel=$1 AND provider_message_id=$2
+         AND (delivery IS NULL OR $4 > CASE delivery WHEN 'delivered' THEN 1 WHEN 'read' THEN 2 ELSE 3 END)`,
+      [channel, m.status!.refersTo, m.status!.state, RANK[m.status!.state]]));
+    return "recorded";
+  }
+  const hashed = senderHash(channel, m.sender);
+  if (m.kind === "opt_out") { await tx((c) => optOut(c, channel, hashed, m.sender)); return "accepted"; }
+  const known = allowedSenders(channel).has(m.rawSender) || (await admitted(channel, m.sender, m.text));
+  if (!known) return "ignored";
+  if (m.kind === "opt_in") { await tx((c) => c.query(`DELETE FROM channel_opt_outs WHERE channel=$1 AND sender_hash=$2`, [channel, hashed])); return "accepted"; }
+  const content = contentHash(channel, JSON.stringify([m.sender, m.text ?? "", m.image?.base64 ?? "", m.attachmentError ?? "", m.place ?? "", m.contactName ?? ""]));
   return tx(async (c) => {
     const r = await c.query(
-      `INSERT INTO channel_inbox (id,channel,provider_message_id,sender,body,image_mime,image_b64,received_at,place_county,place_area,contact_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (channel, provider_message_id) DO NOTHING`,
+      `INSERT INTO channel_inbox (id,channel,provider_message_id,sender,body,image_mime,image_b64,received_at,place_county,place_area,contact_name,content_hash,attachment_error)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (channel, provider_message_id) DO NOTHING`,
       [randomUUID(), channel, m.providerMessageId, m.sender, m.text ?? "", m.image?.mime ?? null, m.image?.base64 ?? null, m.receivedAt,
-        m.place === "outside_kenya" ? "" : m.place?.county ?? null, m.place === "outside_kenya" ? "outside_kenya" : m.place?.area ?? null, m.contactName ?? null],
+        m.place === "outside_kenya" ? "" : m.place?.county ?? null, m.place === "outside_kenya" ? "outside_kenya" : m.place?.area ?? null, m.contactName ?? null,
+        content, m.attachmentError ?? null],
     );
-    return r.rowCount ? "accepted" : "duplicate";
+    if (r.rowCount) return "accepted";
+    // Same id, different content: keep what was accepted and say so
+    const prior = (await c.query(`SELECT content_hash FROM channel_inbox WHERE channel=$1 AND provider_message_id=$2`, [channel, m.providerMessageId])).rows[0];
+    return prior?.content_hash && prior.content_hash !== content ? "conflict" : "duplicate";
   });
 }
 
@@ -126,7 +179,15 @@ export function composeReply(o: { reply: string; extra?: string[]; proposals: { 
   if (o.fresh) head.push(CONSENT);
   // the link is the point of the reply, so only the words before it are cut
   const room = Math.max(o.maxChars - tail.length - 2, 0);
-  const words = head.join("\n\n").slice(0, room).trimEnd();
+  const all = head.filter(Boolean).join("\n\n");
+  // Cut at the end of a line or sentence, never mid-sentence
+  let words = all;
+  if (all.length > room) {
+    const cut = all.slice(0, room);
+    const stop = [...cut.matchAll(/[.!?](?=\s|$)/g)].at(-1)?.index ?? -1;
+    const end = Math.max(cut.lastIndexOf("\n"), stop);
+    words = (end > room / 3 ? cut.slice(0, end + (cut[end] === "\n" ? 0 : 1)) : cut.slice(0, Math.max(room - 1, 0)) + "…").trimEnd();
+  }
   return words ? `${words}\n\n${tail}` : tail;
 }
 
@@ -287,11 +348,37 @@ async function optionsBlock(channel: string, hash: string, taskId: string, token
   return renderOptions(cards, head, compact);
 }
 
+const UNOPENED = "I couldn't open that photo or attachment here, so I haven't used it. Send a screenshot or tell me what you're looking for.";
+
+// After an order is paid or cancelled, a bare message may be about that order:
+// ask instead of opening a new task from it. "NEW ..." or a photo starts one.
+async function afterFinished(channel: string, row: Row): Promise<string | null> {
+  const text = (row.body as string) || "";
+  if (!text || row.image_b64 || row.attachment_error || findLinks(text).some((f) => f.type === "social")) return null;
+  const e = (await tx((c) => c.query(`SELECT task_id, grant_id FROM channel_identities WHERE channel=$1 AND sender_hash=$2`, [channel, senderHash(channel, row.sender as string)]))).rows[0];
+  if (!e) return null;
+  const token = deriveChannelToken(channel, e.grant_id);
+  const v = await getTaskView(e.task_id, token).catch(() => null);
+  if (!v || (v.nextAction !== "paid" && v.nextAction !== "cancelled")) return null;
+  const fresh = /^\s*new\b[\s:,.-]*/i.exec(text);
+  if (fresh) {
+    row.body = text.slice(fresh[0].length).trim();
+    return row.body ? null : "What are you looking for? Send a photo or a few words.";
+  }
+  return `Is this about "${v.title}" (${v.nextAction === "paid" ? "paid" : "cancelled"}) or something new? For something new, send a photo, or reply NEW and what you want.\n\nYour order: ${link(e.task_id, token)}`;
+}
+
 async function processRow(channel: string, row: Row) {
   if (row.body && !row.image_b64) {
     const joined = await tx((c) => handleJoinOrStop(c, channel, senderHash(channel, row.sender as string), row.sender as string, row.body as string));
     if (joined) return finish(channel, row, joined);
   }
+  if (row.attachment_error && !row.body) {
+    const task = await openTask(channel, senderHash(channel, row.sender as string));
+    return finish(channel, row, task ? `${UNOPENED}\n\nYour task: ${link(task.taskId, task.token)}` : UNOPENED);
+  }
+  const ask = await afterFinished(channel, row);
+  if (ask) return finish(channel, row, ask);
   const contact = await handleContact(channel, row);
   if (contact) return finish(channel, row, contact);
   const answered = await handleDestination(channel, row);
@@ -300,7 +387,9 @@ async function processRow(channel: string, row: Row) {
   if (chosen) return finish(channel, row, chosen);
   const image = row.image_b64 ? { mime: row.image_mime as string, base64: row.image_b64 as string } : undefined;
   const { taskId, token, fresh, dest } = await resolveTask(channel, row, !!image);
-  await tx((c) => subscribe(c, taskId, channel, senderHash(channel, row.sender as string), row.sender as string, true));
+  const hash = senderHash(channel, row.sender as string);
+  // Someone who opted out gets replies to what they send, but no order updates until they JOIN again
+  await tx(async (c) => { if (!(await optedOut(c, channel, hash))) await subscribe(c, taskId, channel, hash, row.sender as string, true); });
   const ex = await postExchange(taskId, token, { channel, key: `${channel}:${row.provider_message_id}`, text: (row.body as string) || undefined, image });
   // No item named by the AI: search the words they sent, once
   const words = withoutSocialLinks((row.body as string) ?? "");
@@ -311,7 +400,7 @@ async function processRow(channel: string, row: Row) {
   const where = dest === "ask" ? askLine() : known
     ? (known.handling === "pickup" ? "You'll collect it in Nairobi, as last time." : `Delivering to your door in ${placeLabel(known)}, as last time.`) : "";
   const options = await optionsBlock(channel, senderHash(channel, row.sender as string), taskId, token);
-  const body = composeReply({ reply, extra: [options, where], proposals: ex.proposals as never, link: link(taskId, token), fresh,
+  const body = composeReply({ reply, extra: [row.attachment_error ? UNOPENED : "", options, where], proposals: ex.proposals as never, link: link(taskId, token), fresh,
     maxChars: getChannel(channel).maxReplyChars });
   await finish(channel, row, body);
 }

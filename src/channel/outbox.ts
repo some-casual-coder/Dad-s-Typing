@@ -1,5 +1,6 @@
 import { tx } from "@/domain/db";
 import { DomainError } from "@/domain/errors";
+import { senderHash, splitAddress } from "./bridge";
 
 const MAX_ATTEMPTS = 5;
 
@@ -14,21 +15,32 @@ export async function claimOutbox(channel: string, limit = 5, leaseSeconds = 120
         WHERE id IN (SELECT id FROM channel_outbox WHERE channel=$1 AND (state='pending' OR (state='leased' AND lease_until < now()))
                      AND (not_before IS NULL OR not_before <= now())
                      ORDER BY COALESCE(not_before, created_at), created_at LIMIT $2 FOR UPDATE SKIP LOCKED)
-        RETURNING id, recipient, body, attempts, kind, payload`,
+        RETURNING id, recipient, body, attempts, kind, payload, created_at`,
       [channel, n, String(lease)],
     );
-    return r.rows.map((x) => ({
-      id: x.id as string, recipient: x.recipient as string, body: x.body as string, attempt: x.attempts as number,
-      ...(x.kind === "location" ? { kind: "location", location: x.payload } : x.kind === "contact" ? { kind: "contact", contact: x.payload } : {}),
-    }));
+    // Consent is checked at send time: anything queued before an opt-out is dropped
+    const out = [];
+    for (const x of r.rows) {
+      const stop = (await c.query(`SELECT opted_out_at FROM channel_opt_outs WHERE channel=$1 AND sender_hash=$2`, [channel, senderHash(channel, x.recipient)])).rows[0];
+      if (stop && x.created_at <= stop.opted_out_at) {
+        await c.query(`UPDATE channel_outbox SET state='suppressed', body='', recipient='', payload=NULL, lease_until=NULL, updated_at=now() WHERE id=$1`, [x.id]);
+        continue;
+      }
+      out.push({
+        id: x.id as string, ...splitAddress(x.recipient as string), body: x.body as string, attempt: x.attempts as number,
+        ...(x.kind === "location" ? { kind: "location", location: x.payload } : x.kind === "contact" ? { kind: "contact", contact: x.payload } : {}),
+      });
+    }
+    return out;
   });
 }
 
-const FINAL = new Set(["sent", "failed", "unknown"]);
+const ACKS = new Set(["sent", "failed", "unknown"]);
+const FINAL = new Set([...ACKS, "suppressed"]);
 
 // Idempotent: the first final state wins and the message text is dropped
 export async function ackOutbox(channel: string, id: string, ack: { state: string; providerMessageId?: string; error?: string }) {
-  if (!FINAL.has(ack.state)) throw new DomainError("invalid", "state");
+  if (!ACKS.has(ack.state)) throw new DomainError("invalid", "state");
   if (ack.providerMessageId !== undefined && !/^[A-Za-z0-9_.:-]{1,128}$/.test(ack.providerMessageId)) throw new DomainError("invalid", "providerMessageId");
   if (ack.error !== undefined && !/^[a-z0-9_.-]{1,60}$/i.test(ack.error)) throw new DomainError("invalid", "error");
   return tx(async (c) => {

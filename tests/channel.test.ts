@@ -126,9 +126,15 @@ describe("inbound", () => {
   });
 
   it("validates the payload", async () => {
-    for (const bad of [{ sender: "abc" }, { providerMessageId: "bad id!" }, { image: { mime: "image/gif", base64: "AAAA" } }, { image: { mime: "image/png", base64: "***" } }, { image: { mime: "image/png", base64: Buffer.from("not really a png").toString("base64") } }, { image: { mime: "image/jpeg", base64: readFileSync("tests/fixtures/carrier.png").toString("base64") } }, { text: "", image: undefined }, { receivedAt: "nope" }]) {
+    for (const bad of [{ sender: "abc" }, { providerMessageId: "bad id!" }, { image: { mime: "image/png" } }, { text: "", image: undefined }, { receivedAt: "nope" }, { kind: "nope" }, { attachment: { error: "x" } }]) {
       expect((await signed(inbound, IN, msg(bad))).status).toBe(422);
     }
+    // An image we can't use is kept as "couldn't open it", never as the bytes
+    for (const unusable of [{ mime: "image/gif", base64: "AAAA" }, { mime: "image/png", base64: "***" }, { mime: "image/png", base64: Buffer.from("not really a png").toString("base64") }, { mime: "image/jpeg", base64: readFileSync("tests/fixtures/carrier.png").toString("base64") }]) {
+      expect((await signed(inbound, IN, msg({ text: undefined, image: unusable }))).status).toBe(202);
+    }
+    expect(await count(`SELECT count(*)::int n FROM channel_inbox WHERE image_b64 IS NOT NULL`)).toBe(0);
+    expect(await count(`SELECT count(*)::int n FROM channel_inbox WHERE attachment_error='unsupported'`)).toBe(4);
   });
 
   it("a duplicate delivery is stored once", async () => {
@@ -532,7 +538,7 @@ describe("WhatsApp updates opt-in", () => {
     await pool.query(`INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES (gen_random_uuid(),'whatsapp','254700000001','x','rem:test:1')`);
     expect(await send({ text: "STOP" })).toMatch(/^Okay, no more order updates here/);
     expect((await pool.query(`SELECT count(*)::int n FROM channel_subscriptions WHERE task_id=$1`, [t.taskId])).rows[0].n).toBe(0);
-    expect((await pool.query(`SELECT count(*)::int n FROM channel_outbox WHERE dedupe_key='rem:test:1'`)).rows[0].n).toBe(0);
+    expect((await pool.query(`SELECT state, body FROM channel_outbox WHERE dedupe_key='rem:test:1'`)).rows).toEqual([{ state: "suppressed", body: "" }]);
   });
 });
 

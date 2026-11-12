@@ -33,12 +33,24 @@ export async function admitted(channel: string, sender: string, text?: string): 
   return !!m && !!(await pool.query(`SELECT 1 FROM channel_join_codes WHERE code_hash=$1 AND used_at IS NULL AND expires_at > now()`, [hash(m[1])])).rowCount;
 }
 
+// Unsent work for this person stops now, a later retry of it is dropped at send
+// time, and no new update subscription starts until they JOIN again
+export async function optOut(c: Tx, channel: string, hashed: string, sender: string) {
+  await c.query(`INSERT INTO channel_opt_outs (channel,sender_hash) VALUES ($1,$2) ON CONFLICT (channel,sender_hash) DO UPDATE SET opted_out_at=now()`, [channel, hashed]);
+  const r = await c.query(`DELETE FROM channel_subscriptions WHERE channel=$1 AND sender_hash=$2`, [channel, hashed]);
+  await c.query(`UPDATE channel_outbox SET state='suppressed', body='', recipient='', payload=NULL, lease_until=NULL, updated_at=now()
+    WHERE channel=$1 AND recipient=$2 AND (state='pending' OR (state='leased' AND lease_until < now()))`, [channel, sender]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+export const optedOut = async (c: Tx, channel: string, hashed: string) =>
+  !!(await c.query(`SELECT 1 FROM channel_opt_outs WHERE channel=$1 AND sender_hash=$2`, [channel, hashed])).rowCount;
+
 // "JOIN ABC123" subscribes this sender; "STOP" unsubscribes them everywhere
 export async function handleJoinOrStop(c: Tx, channel: string, hashed: string, sender: string, text: string): Promise<string | null> {
   if (/^\s*stop\s*$/i.test(text)) {
-    const r = await c.query(`DELETE FROM channel_subscriptions WHERE channel=$1 AND sender_hash=$2`, [channel, hashed]);
-    await c.query(`DELETE FROM channel_outbox WHERE channel=$1 AND recipient=$2 AND state='pending' AND (dedupe_key LIKE 'upd:%' OR dedupe_key LIKE 'rem:%')`, [channel, sender]);
-    return r.rowCount ? "Okay, no more order updates here. Send JOIN and a code from the order page to start again." : "You're not getting any order updates here.";
+    return (await optOut(c, channel, hashed, sender))
+      ? "Okay, no more order updates here. Send JOIN and a code from the order page to start again." : "You're not getting any order updates here.";
   }
   const m = JOIN.exec(text);
   if (!m) return null;
@@ -46,6 +58,7 @@ export async function handleJoinOrStop(c: Tx, channel: string, hashed: string, s
     `UPDATE channel_join_codes SET used_at=now() WHERE code_hash=$1 AND used_at IS NULL AND expires_at > now() RETURNING task_id, can_pay`,
     [hash(m[1])])).rows[0];
   if (!row) return "That code didn't work. It may have expired or been used; make a new one on the order page.";
+  await c.query(`DELETE FROM channel_opt_outs WHERE channel=$1 AND sender_hash=$2`, [channel, hashed]);
   await subscribe(c, row.task_id, channel, hashed, sender, row.can_pay);
   await c.query(`INSERT INTO channel_admitted_senders (channel,sender_hash) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [channel, hashed]);
   const t = (await c.query(`SELECT title FROM tasks WHERE id=$1`, [row.task_id])).rows[0];

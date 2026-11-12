@@ -10,14 +10,30 @@ export function menuCards(c: Cards, max: number): Card[] {
   return [...c.closest, ...c.similar].slice(0, max);
 }
 
+// Clipped titles that come out the same keep the words that tell them apart
+// ("…Skylift… 45 cm" and "…Skylift… 55 cm"), so a numbered choice is never a guess
+export function optionLabels(titles: string[], n: number): string[] {
+  const out = titles.map((t) => clip(t, n));
+  return out.map((l, i) => {
+    const twin = out.findIndex((o, j) => j !== i && o === l);
+    if (twin < 0) return l;
+    const a = titles[i].split(" "), b = titles[twin].split(" ");
+    let k = 0;
+    while (k < a.length && a[k] === b[k]) k++;
+    const tail = clip(a.slice(k).join(" "), n - 9);
+    return tail ? `${clip(a.slice(0, k).join(" "), n - tail.length - 1)} ${tail}` : l;
+  });
+}
+
 export function renderOptions(cards: Card[], head: string, compact: boolean): string {
   if (!cards.length) return "";
+  const names = optionLabels(cards.map((c) => c.title), compact ? 28 : 48);
   const lines = cards.map((c, i) => {
     const price = c.price ? c.price.replace(/^about /, "") : c.quoteRequired ? "quote required" : "delivery cost not confirmed";
     const date = c.arrival ? `, arrives ${shortDates(c.arrival)}` : "";
     const note = compact ? "" : ` ${c.winner ? "Best delivered price." : c.difference}`;
     const demo = c.provider === "demo" ? " (demo seller)" : "";
-    return `${i + 1}) ${clip(c.title, compact ? 28 : 48)}${demo}: ${price}${date}.${note}`;
+    return `${i + 1}) ${names[i]}${demo}: ${price}${date}.${note}`;
   });
   const pick = cards.length === 1 ? "Reply 1 to choose it." : `Reply ${cards.map((_, i) => i + 1).join(", ").replace(/, (\d)$/, " or $1")} to choose.`;
   return [head, ...lines, pick].join("\n");
