@@ -336,3 +336,21 @@ describe("packaging priors order", () => {
     expect(estimateParcel({ title: "Folding wire dog crate 36 inch" }).kind).toBe("crate");
   });
 });
+
+describe("public holidays in arrival dates", () => {
+  it("knows Kenyan and US carrier holidays, with the Sunday and observed rules", async () => {
+    const { easter, isHoliday } = await import("@/delivery/holidays");
+    expect(easter(2026).toISOString().slice(0, 10)).toBe("2026-04-05");
+    expect(["2026-04-03", "2026-04-06", "2026-06-01", "2026-10-20", "2026-12-25", "2026-12-26"].every((d) => isHoliday(d, "ke"))).toBe(true);
+    expect(isHoliday("2023-01-02", "ke")).toBe(true);
+    expect(isHoliday("2026-11-26", "us")).toBe(true);
+    expect(isHoliday("2026-07-03", "us")).toBe(true);
+    expect(isHoliday("2026-11-26", "ke")).toBe(false);
+    expect(isHoliday("2026-12-28", "us")).toBe(false);
+  });
+  it("skips them when counting working days", () => {
+    const wed = new Date("2026-12-23T00:00:00Z");
+    expect(addWorkingDays(wed, 2, "ke").toISOString().slice(0, 10)).toBe("2026-12-28");
+    expect(addWorkingDays(new Date("2026-11-25T00:00:00Z"), 1, "us").toISOString().slice(0, 10)).toBe("2026-11-27");
+  });
+});

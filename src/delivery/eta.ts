@@ -1,6 +1,8 @@
+import { isHoliday } from "./holidays";
+
 // Arrival date range from legs, each with its source. Dates are calendar
-// days in Nairobi time. Kenyan public holidays are not modelled yet.
-export interface Leg { label: string; low: number; high: number; unit: "working" | "calendar"; source: string; assumed: boolean }
+// days in Nairobi time.
+export interface Leg { label: string; low: number; high: number; unit: "working" | "calendar"; source: string; assumed: boolean; calendar?: "ke" | "us" }
 export interface Eta { earliest: string; latest: string; legs: Leg[]; assumptions: string[]; confidence: "medium" | "low" }
 
 export type Lane = "kentex_amazon" | "kentex_store" | "aquantuo_uk" | "aquantuo_us" | "local_demo";
@@ -15,16 +17,17 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * DAY);
 const weekday = (d: Date) => d.getUTCDay();
 
-export function addWorkingDays(d: Date, n: number): Date {
+// Weekends and that side's public holidays are not working days
+export function addWorkingDays(d: Date, n: number, where: "ke" | "us" = "ke"): Date {
   let out = d, left = n;
   while (left > 0) {
     out = addDays(out, 1);
-    if (weekday(out) !== 0 && weekday(out) !== 6) left--;
+    if (weekday(out) !== 0 && weekday(out) !== 6 && !isHoliday(iso(out), where)) left--;
   }
   return out;
 }
 
-const add = (d: Date, l: Leg, end: "low" | "high") => (l.unit === "working" ? addWorkingDays(d, l[end]) : addDays(d, l[end]));
+const add = (d: Date, l: Leg, end: "low" | "high") => (l.unit === "working" ? addWorkingDays(d, l[end], l.calendar ?? "ke") : addDays(d, l[end]));
 
 // Kentex air leaves Wednesday; parcels must be in by Monday (P). The fast
 // case makes a Monday arrival; the slow case assumes it misses it.
@@ -46,11 +49,11 @@ function legs(lane: Lane, area: Area, handling: "pickup" | "door"): Leg[] {
       : { label: area === "upcountry" ? "Delivery to your door outside Nairobi" : "Delivery to your door", low: 1, high: 4, unit: "working", source: "Our assumption (M)", assumed: true };
   switch (lane) {
     case "kentex_amazon":
-      return [{ label: "Amazon delivers to Kentex in Texas", low: 1, high: 4, unit: "working", source: `${KENTEX_AMAZON}; Prime timing assumed (M)`, assumed: true },
+      return [{ label: "Amazon delivers to Kentex in Texas", low: 1, high: 4, unit: "working", calendar: "us", source: `${KENTEX_AMAZON}; Prime timing assumed (M)`, assumed: true },
         { label: "Air freight to Kenya", low: 7, high: 14, unit: "working", source: KENTEX_AIR, assumed: false }, last];
     case "kentex_store":
-      return [{ label: "Kentex quotes and buys it", low: 1, high: 2, unit: "working", source: "kentexcargo.com/help/usa/assisted-shopping, quote within 24 h (P)", assumed: false },
-        { label: "The store delivers to Kentex in the US", low: 3, high: 7, unit: "working", source: "Typical US store delivery, assumed (M)", assumed: true },
+      return [{ label: "Kentex quotes and buys it", low: 1, high: 2, unit: "working", calendar: "us", source: "kentexcargo.com/help/usa/assisted-shopping, quote within 24 h (P)", assumed: false },
+        { label: "The store delivers to Kentex in the US", low: 3, high: 7, unit: "working", calendar: "us", source: "Typical US store delivery, assumed (M)", assumed: true },
         { label: "Air freight to Kenya", low: 7, high: 14, unit: "working", source: KENTEX_AIR, assumed: false }, last];
     case "aquantuo_uk":
       return [{ label: "Aquantuo buys, ships and clears it", low: 10, high: 15, unit: "working", source: "Aquantuo Kenya rate card, from payment (N)", assumed: false }, last];
@@ -75,7 +78,7 @@ export function estimateArrival(lane: Lane, now: Date, opts: { area?: Area; hand
   };
   const assumptions = [
     ...(kentex ? ["Kentex's 7 to 14 working days is counted from the Wednesday flight, not from ordering.", "Customs time is inside Kentex's transit range."] : []),
-    "Kenyan public holidays are not counted.",
+    "Weekends and public holidays are skipped (Kenya for the Kenyan side, the main US carrier holidays for the US side; Eid al-Fitr uses the expected date).",
     ...ls.filter((l) => l.assumed).map((l) => `${l.label}: our estimate.`),
   ];
   const assumed = ls.filter((l) => l.assumed).length;
