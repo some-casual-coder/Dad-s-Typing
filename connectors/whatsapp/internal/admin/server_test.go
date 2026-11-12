@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,6 +95,13 @@ func TestPair(t *testing.T) {
 	rec := do(h, "POST", "/pair", "Bearer "+tok, `{"phone":"254712345678"}`)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "ABCD-1234") {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPairFailureReasonIsRedacted(t *testing.T) {
+	got := redact(errors.New("pair 254712345678@s.whatsapp.net: info query returned status 429"))
+	if strings.Contains(got, "254712345678") || !strings.Contains(got, "status 429") {
+		t.Fatalf("%s", got)
 	}
 }
 

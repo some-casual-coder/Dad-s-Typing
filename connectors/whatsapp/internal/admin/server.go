@@ -48,6 +48,18 @@ type Status struct {
 
 var phoneRe = regexp.MustCompile(`^[0-9]{8,15}$`)
 
+var digitsRe = regexp.MustCompile(`[0-9]{6,}`)
+
+// redact shortens an upstream error for the operator, masking anything that
+// could be a phone number or JID user part.
+func redact(err error) string {
+	msg := digitsRe.ReplaceAllString(err.Error(), "…")
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	return msg
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
@@ -149,7 +161,7 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	}
 	code, err := s.TR.PairPhone(r.Context(), in.Phone)
 	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "pair_failed"})
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "pair_failed", "reason": redact(err)})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"code": code})
@@ -162,7 +174,7 @@ func (s *Server) startQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.TR.StartQR(r.Context()); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "qr_failed"})
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "qr_failed", "reason": redact(err)})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
