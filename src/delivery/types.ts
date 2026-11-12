@@ -1,5 +1,6 @@
 import type { OfferSpecs } from "@/adapters/types";
 import type { Identity } from "./identity";
+import type { Eta } from "./eta";
 import type { ParcelEstimate } from "./packaging";
 
 export type CostStatus = "known" | "estimated" | "included" | "unknown" | "not_applicable";
@@ -104,6 +105,7 @@ export interface Plan {
   primary: boolean;
   confidence: "high" | "medium" | "low";
   parcel: ParcelEstimate | null;
+  eta: Eta | null;
   // Priced parts in one currency; null when none is priced or currencies differ
   knownMinor: number | null;
   knownHighMinor: number | null;

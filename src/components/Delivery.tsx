@@ -1,4 +1,5 @@
 "use client";
+import { formatRange } from "@/delivery/eta";
 import { useCallback, useEffect, useState } from "react";
 import type { Component, Plan } from "@/delivery/types";
 import { STEP_LABELS, stepsFor, type Step } from "@/delivery/steps";
@@ -61,6 +62,7 @@ function PlanCard({ p, winner, v, taskId, token, canEdit, onChanged }: {
       </div>
       <p className="seller">{p.provider === "demo" ? "Demo seller" : p.provider === "store" ? "Direct from the store" : p.provider === "aquantuo" ? "Aquantuo" : "Kentex"}{p.exact ? "" : " · similar or unverified item"}</p>
       {total ? <p className="price">{total}</p> : <p className="muted">Not a total yet. Some costs are unknown.</p>}
+      {p.eta && <p className="small">Arrives {formatRange(p.eta.earliest, p.eta.latest)}</p>}
       <p className="small">{p.why}</p>
       {p.availability !== "ineligible" && (
         <ul className="reasons">

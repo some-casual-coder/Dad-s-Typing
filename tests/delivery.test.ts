@@ -4,6 +4,7 @@ import { amazonUsListing, buildPlans, cheapestDelivered, type Inputs } from "@/d
 import { freight, kenyaDelivery } from "@/delivery/estimate";
 import { chargeableKg, estimateParcel, KENTEX_CM3_PER_KG } from "@/delivery/packaging";
 import { nextAction } from "@/delivery/steps";
+import { addWorkingDays, estimateArrival, formatRange, kentexDeparture, nairobiDate } from "@/delivery/eta";
 import { FALLBACK_FX, fxLabel, toKes } from "@/delivery/fx";
 import { closestMatch, identity } from "@/delivery/identity";
 import type { ImportedQuote, OfferInput, Plan } from "@/delivery/types";
@@ -217,5 +218,59 @@ describe("packaging priors", () => {
     const e = estimateParcel({ title: "Wire dog crate", specs: { weightGrams: 9000, lengthMm: 760, widthMm: 480, heightMm: 530 } });
     expect(e.low.heightMm).toBeLessThanOrEqual(110);
     expect(e.high.heightMm).toBeGreaterThan(480);
+  });
+});
+
+describe("arrival dates", () => {
+  // 2026-11-12 is a Thursday; 2026-11-16 a Monday
+  const at = (iso: string) => new Date(`${iso}T09:00:00+03:00`);
+
+  it("counts working days and skips weekends", () => {
+    const fri = nairobiDate(at("2026-11-13"));
+    expect(addWorkingDays(fri, 1).toISOString().slice(0, 10)).toBe("2026-11-16");
+    expect(addWorkingDays(fri, 5).toISOString().slice(0, 10)).toBe("2026-11-20");
+  });
+
+  it("uses the Nairobi date, not UTC, near midnight", () => {
+    expect(nairobiDate(new Date("2026-11-12T22:30:00Z")).toISOString().slice(0, 10)).toBe("2026-11-13");
+  });
+
+  it("makes the Wednesday flight when in by Monday, and the next one when after", () => {
+    const mon = nairobiDate(at("2026-11-16")), tue = nairobiDate(at("2026-11-17"));
+    expect(kentexDeparture(mon, "low").toISOString().slice(0, 10)).toBe("2026-11-18");
+    expect(kentexDeparture(mon, "high").toISOString().slice(0, 10)).toBe("2026-11-25");
+    expect(kentexDeparture(tue, "low").toISOString().slice(0, 10)).toBe("2026-11-25");
+    const sun = nairobiDate(at("2026-11-15"));
+    expect(kentexDeparture(sun, "high").toISOString().slice(0, 10)).toBe("2026-11-18");
+  });
+
+  it("gives an Amazon order placed Thursday a range from the flight", () => {
+    const e = estimateArrival("kentex_amazon", at("2026-11-12"), { area: "nairobi", handling: "door" });
+    // Fast: Fri at warehouse, Wed 18 flight, +7 working days = 27 Nov, +1 = 30 Nov
+    expect(e.earliest).toBe("2026-11-30");
+    // Slow: Wed 18 at warehouse, Wed 25 flight, +14 = 15 Dec, +2 = 17 Dec
+    expect(e.latest).toBe("2026-12-17");
+    expect(e.assumptions.join(" ")).toMatch(/from the Wednesday flight/);
+  });
+
+  it("widens the range when a leg is our default", () => {
+    const amazon = estimateArrival("kentex_amazon", at("2026-11-12"));
+    const store = estimateArrival("kentex_store", at("2026-11-12"));
+    expect(store.latest > amazon.latest).toBe(true);
+    expect(store.confidence).toBe("low");
+    const up = estimateArrival("kentex_amazon", at("2026-11-12"), { area: "upcountry" });
+    const nbo = estimateArrival("kentex_amazon", at("2026-11-12"), { area: "nairobi" });
+    expect(up.latest > nbo.latest).toBe(true);
+  });
+
+  it("formats a short range", () => {
+    expect(formatRange("2026-12-02", "2026-12-09")).toBe("about 2 to 9 December");
+    expect(formatRange("2026-11-30", "2026-12-17")).toBe("about 30 November to 17 December");
+  });
+
+  it("puts a date on every priced import card and none on an unconfirmed store route", () => {
+    const ps = buildPlans(base({ offers: [amazon, uk] }));
+    expect(ps.filter((p) => p.primary).every((p) => p.eta)).toBe(true);
+    expect(find(ps, "A", "store", "direct").eta).toBeNull();
   });
 });

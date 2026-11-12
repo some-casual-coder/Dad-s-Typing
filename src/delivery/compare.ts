@@ -1,4 +1,5 @@
 import { amazonTax, customs, fee, freight, isPriced, kentexInsurance, kenyaDelivery, overallConfidence, storeTaxAndDelivery, sumKnown } from "./estimate";
+import { estimateArrival, type Area, type Lane } from "./eta";
 import type { FxTable } from "./fx";
 import { handoffFor } from "./handoff";
 import { estimateParcel, type ParcelEstimate } from "./packaging";
@@ -131,6 +132,16 @@ function underBudget(parts: Component[], kes: Plan["kes"], complete: boolean, pr
   return all && k.high <= budget ? "yes" : "unknown";
 }
 
+function laneOf(d: Draft): Lane | null {
+  if (d.route === "local") return "local_demo";
+  if (d.provider === "kentex") return d.mode === "amazon_buy_ship" ? "kentex_amazon" : "kentex_store";
+  if (d.provider === "aquantuo") return d.offer.currency === "GBP" ? "aquantuo_uk" : "aquantuo_us";
+  return null;
+}
+
+const areaOf = (dest: Destination | null): Area =>
+  !dest?.county ? "unknown" : /nairobi/i.test(dest.county) ? "nairobi" : "upcountry";
+
 export function buildPlans(i: Inputs): Plan[] {
   return drafts(i).map((d) => {
     const provider = d.provider;
@@ -150,6 +161,7 @@ export function buildPlans(i: Inputs): Plan[] {
       exact: d.offer.exact, match: d.offer.match ?? null, availability: d.availability,
       why: usable ? `Uses your ${provider} quote.` : q && expired ? "Your saved quote has expired. Get a fresh one." : d.why,
       components: parts, complete, primary: d.primary, confidence: overallConfidence(parts), parcel: d.parcel,
+      eta: laneOf(d) ? estimateArrival(laneOf(d)!, i.now, { area: areaOf(i.destination), handling: i.prefs.handling }) : null,
       knownMinor: sums.single?.low ?? null, knownHighMinor: sums.single?.high ?? null,
       knownCurrency: sums.single?.cur ?? null, kes, underBudget: underBudget(parts, kes, complete, i.prefs, i.fx),
       quote: q ? { reference: q.reference, expired, expiresAt: q.expiresAt } : null,
