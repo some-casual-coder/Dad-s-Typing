@@ -535,3 +535,21 @@ describe("WhatsApp updates opt-in", () => {
     expect((await pool.query(`SELECT count(*)::int n FROM channel_outbox WHERE dedupe_key='rem:test:1'`)).rows[0].n).toBe(0);
   });
 });
+
+describe("payer admitted by starting the chat", () => {
+  it("a number not on the allowlist is admitted by a valid JOIN code, and only then", async () => {
+    const { createTask } = await import("@/domain/tasks");
+    const { createJoinCode } = await import("@/channel/join");
+    const t = await createTask({ title: "Cat carrier", starterRoles: ["helper", "payer"], starterLabel: "Payer" });
+    const { code } = await createJoinCode(t.taskId, t.token);
+    const stranger = (o: Record<string, unknown>) => msg({ sender: "254799999001", ...o });
+    expect((await signed(inbound, IN, stranger({ text: "hello" }))).json).toMatchObject({ status: "ignored" });
+    expect((await signed(inbound, IN, stranger({ text: "JOIN ZZZZZZ" }))).json).toMatchObject({ status: "ignored" });
+    expect((await signed(inbound, IN, stranger({ text: `JOIN ${code}` }))).status).toBe(202);
+    await processInboxOnce("whatsapp");
+    const sub = (await pool.query(`SELECT can_pay FROM channel_subscriptions WHERE task_id=$1`, [t.taskId])).rows;
+    expect(sub).toEqual([{ can_pay: true }]);
+    // From now on they can chat like anyone else
+    expect((await signed(inbound, IN, stranger({ text: "STOP" }))).status).toBe(202);
+  });
+});

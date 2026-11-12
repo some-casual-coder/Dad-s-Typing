@@ -218,12 +218,14 @@ func (w *Worker) paceWait() time.Duration {
 	return wait
 }
 
+var phoneDigits = regexp.MustCompile(`^[0-9]{8,15}$`)
+
 func (w *Worker) send(ctx context.Context, it tsapp.Item, id string) error {
 	switch {
 	case it.Kind == "location" && it.Location != nil:
 		p := it.Location
 		return w.TR.SendRich(ctx, it.Recipient, transport.Rich{Kind: "location", Lat: p.Lat, Lon: p.Lon, Name: p.Name, Address: p.Address}, id)
-	case it.Kind == "contact" && it.Contact != nil:
+	case it.Kind == "contact" && it.Contact != nil && phoneDigits.MatchString(strings.TrimPrefix(it.Contact.Phone, "+")):
 		return w.TR.SendRich(ctx, it.Recipient, transport.Rich{Kind: "contact", Name: it.Contact.Name, VCard: vcard(it.Contact)}, id)
 	case it.Kind == "" || it.Kind == "text":
 		return w.TR.Send(ctx, it.Recipient, it.Body, id)
@@ -231,10 +233,14 @@ func (w *Worker) send(ctx context.Context, it tsapp.Item, id string) error {
 	return transport.ErrRejected
 }
 
-// vcard builds a minimal card; names and numbers come from the app's hub list.
+// vcard builds a vCard 3.0 in the shape WhatsApp shares itself: the waid
+// parameter makes the number tappable as a WhatsApp chat.
 func vcard(c *tsapp.OutCard) string {
-	clean := strings.NewReplacer("\n", " ", "\r", " ", ";", " ").Replace
-	return "BEGIN:VCARD\nVERSION:3.0\nFN:" + clean(c.Name) + "\nTEL;type=WORK:" + clean(c.Phone) + "\nEND:VCARD"
+	clean := strings.NewReplacer("\n", " ", "\r", " ", ";", " ", ",", " ").Replace
+	name := strings.TrimSpace(clean(c.Name))
+	digits := strings.TrimPrefix(strings.TrimSpace(c.Phone), "+")
+	return "BEGIN:VCARD\nVERSION:3.0\nN:;" + name + ";;;\nFN:" + name +
+		"\nTEL;type=CELL;type=VOICE;waid=" + digits + ":+" + digits + "\nEND:VCARD"
 }
 
 func (w *Worker) dispatch(ctx context.Context, it tsapp.Item) {

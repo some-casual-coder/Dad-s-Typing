@@ -275,30 +275,42 @@ func (w *WA) SendRich(ctx context.Context, phone string, r Rich, id string) erro
 	if !w.State().Ready() {
 		return ErrNotReady
 	}
-	if !phoneRe.MatchString(phone) || r.Name == "" {
+	if !phoneRe.MatchString(phone) {
 		return ErrRejected
 	}
-	var msg *waE2E.Message
-	switch r.Kind {
-	case "location":
-		msg = &waE2E.Message{LocationMessage: &waE2E.LocationMessage{
-			DegreesLatitude: proto.Float64(r.Lat), DegreesLongitude: proto.Float64(r.Lon),
-			Name: proto.String(r.Name), Address: proto.String(r.Address)}}
-	case "contact":
-		if r.VCard == "" {
-			return ErrRejected
-		}
-		msg = &waE2E.Message{ContactMessage: &waE2E.ContactMessage{
-			DisplayName: proto.String(r.Name), Vcard: proto.String(r.VCard)}}
-	default:
+	msg, err := BuildRich(r)
+	if err != nil {
 		return ErrRejected
 	}
-	_, err := w.cur().SendMessage(ctx, types.NewJID(phone, types.DefaultUserServer), msg,
+	_, err = w.cur().SendMessage(ctx, types.NewJID(phone, types.DefaultUserServer), msg,
 		whatsmeow.SendRequestExtra{ID: types.MessageID(id)})
 	if errors.Is(err, whatsmeow.ErrNotLoggedIn) {
 		return ErrNotReady
 	}
 	return err
+}
+
+var errBadRich = errors.New("invalid rich message")
+
+// BuildRich makes the protobuf WhatsApp clients render as a map card or a
+// tappable contact; tested offline so the first real send is not the test.
+func BuildRich(r Rich) (*waE2E.Message, error) {
+	switch r.Kind {
+	case "location":
+		if r.Name == "" || r.Lat < -90 || r.Lat > 90 || r.Lon < -180 || r.Lon > 180 || (r.Lat == 0 && r.Lon == 0) {
+			return nil, errBadRich
+		}
+		return &waE2E.Message{LocationMessage: &waE2E.LocationMessage{
+			DegreesLatitude: proto.Float64(r.Lat), DegreesLongitude: proto.Float64(r.Lon),
+			Name: proto.String(r.Name), Address: proto.String(r.Address)}}, nil
+	case "contact":
+		if r.Name == "" || r.VCard == "" {
+			return nil, errBadRich
+		}
+		return &waE2E.Message{ContactMessage: &waE2E.ContactMessage{
+			DisplayName: proto.String(r.Name), Vcard: proto.String(r.VCard)}}, nil
+	}
+	return nil, errBadRich
 }
 
 // freshClient swaps in an unpaired client after a logout or revoke.

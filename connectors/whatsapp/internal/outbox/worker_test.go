@@ -371,7 +371,7 @@ func TestPinAndContactCardSent(t *testing.T) {
 		tsapp.Item{ID: id1, Recipient: "254700000001", Body: "Pickup point", Attempt: 1, Kind: "location",
 			Location: &tsapp.OutPin{Lat: -1.268, Lon: 36.809, Name: "Kentex Cargo", Address: "65 Muthithi Road"}},
 		tsapp.Item{ID: id2, Recipient: "254700000001", Body: "Contact", Attempt: 1, Kind: "contact",
-			Contact: &tsapp.OutCard{Name: "Kentex Nairobi", Phone: "+254700000000"}},
+			Contact: &tsapp.OutCard{Name: "Kentex Nairobi", Phone: "+254800000323"}},
 		tsapp.Item{ID: id3, Recipient: "254700000001", Body: "bad", Attempt: 1, Kind: "location"})
 	r.ts.Unlock()
 	r.worker().Poll(context.Background())
@@ -382,7 +382,7 @@ func TestPinAndContactCardSent(t *testing.T) {
 	if a := r.acks(id3); len(a) != 1 || a[0].State != "failed" {
 		t.Fatalf("a pin without coordinates must fail, got %v", a)
 	}
-	if v := vcard(&tsapp.OutCard{Name: "A;B\nC", Phone: "+1"}); v != "BEGIN:VCARD\nVERSION:3.0\nFN:A B C\nTEL;type=WORK:+1\nEND:VCARD" {
+	if v := vcard(&tsapp.OutCard{Name: "A;B\nC", Phone: "+254709443000"}); v != "BEGIN:VCARD\nVERSION:3.0\nN:;A B C;;;\nFN:A B C\nTEL;type=CELL;type=VOICE;waid=254709443000:+254709443000\nEND:VCARD" {
 		t.Fatalf("vcard %q", v)
 	}
 }

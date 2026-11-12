@@ -83,3 +83,32 @@ func TestMapLocationAndContact(t *testing.T) {
 		t.Fatalf("contact %+v", c)
 	}
 }
+
+func TestBuildRichMarshalsLikeWhatsApp(t *testing.T) {
+	loc, err := BuildRich(Rich{Kind: "location", Lat: -1.269991, Lon: 36.8112181, Name: "Kentex Cargo", Address: "65 Muthithi Road"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := proto.Marshal(loc)
+	if err != nil || len(b) == 0 {
+		t.Fatalf("marshal %v", err)
+	}
+	var back waE2E.Message
+	if err := proto.Unmarshal(b, &back); err != nil || back.GetLocationMessage().GetDegreesLatitude() != -1.269991 ||
+		back.GetLocationMessage().GetName() != "Kentex Cargo" || back.GetLocationMessage().GetAddress() != "65 Muthithi Road" {
+		t.Fatalf("round trip %v %+v", err, back.GetLocationMessage())
+	}
+	// The receiving side of this connector maps it back to the same pin
+	if m := mapMessage(nil, ev(&back)); m.Kind != KindLocation || m.Lat != -1.27 || m.Lon != 36.81 {
+		t.Fatalf("mapped %+v", m)
+	}
+	card, err := BuildRich(Rich{Kind: "contact", Name: "Aquantuo", VCard: "BEGIN:VCARD\nVERSION:3.0\nFN:Aquantuo\nEND:VCARD"})
+	if err != nil || card.GetContactMessage().GetDisplayName() != "Aquantuo" {
+		t.Fatalf("card %v", err)
+	}
+	for _, bad := range []Rich{{Kind: "location", Name: "x"}, {Kind: "location", Lat: 91, Lon: 1, Name: "x"}, {Kind: "contact", Name: "x"}, {Kind: "sticker", Name: "x"}} {
+		if _, err := BuildRich(bad); err == nil {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+}

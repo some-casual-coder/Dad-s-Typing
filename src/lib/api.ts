@@ -17,7 +17,13 @@ export interface ConciergeSummary {
   provider: string; capMinor: number; estimateMinor: number; rule: string; arrival: string | null;
   lines: { label: string; status: string; currency: string; minor: number | null; highMinor: number | null }[];
 }
+export interface Notice {
+  body: string; at: string;
+  place: { name: string; address: string | null; mapsUrl: string | null; hours: string | null; pin: { approximate: boolean } | null } | null;
+  contact: { name: string; phone: string } | null;
+}
 export interface Fulfilment {
+  notices: Notice[];
   arrival: string | null; next: string[]; canCancel: boolean;
   done: { status: string; text: string; at: string; source: string; note?: string }[];
   money?: { capMinor: number; estimateMinor: number; actualMinor: number | null; extraDueMinor: number | null; extraDecision: string | null; currency: string; rule: string; concierge: string };

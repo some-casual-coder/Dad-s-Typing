@@ -146,7 +146,13 @@ describe("one payment for an import (option B, sandbox)", () => {
     const s = await paidImport({ subscribe: true });
     for (const st of ["ordered", "at_warehouse", "departed", "cleared", "ready_to_collect"]) await recordFulfilment(gate.payments as Payments, ev(s.order.id, st));
     const ready = (await pool.query(`SELECT body FROM channel_outbox WHERE recipient='254700000009' AND dedupe_key LIKE 'upd:%' ORDER BY created_at DESC LIMIT 1`)).rows[0].body;
-    expect(ready).toMatch(/ready to collect at Kentex Cargo, Westlands office, 65 Muthithi Road.*maps\.google\.com/);
+    expect(ready).toMatch(/ready to collect at Kentex Cargo, Westlands air cargo pickup, 65 Muthithi Road.*maps\.google\.com/);
+    // The same engine notice reaches the browser, for every role
+    const { createInvite } = await import("@/domain/tasks");
+    const mum = await createInvite(s.taskId, s.token, { roles: ["requester", "chooser"], label: "Mum" });
+    const seen = (await getTaskView(s.taskId, mum.token)).fulfilment!.notices;
+    expect(seen.at(-1)!.body).toMatch(/ready to collect at Kentex/);
+    expect(seen.at(-1)!.place!.mapsUrl).toMatch(/maps\.google\.com/);
     const rem = async () => (await pool.query(`SELECT count(*)::int n FROM channel_outbox WHERE dedupe_key LIKE $1`, [`rem:${s.order.id}:%`])).rows[0].n;
     expect(await rem()).toBe(2);
     await recordFulfilment(gate.payments as Payments, ev(s.order.id, "delivered"));

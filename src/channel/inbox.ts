@@ -13,7 +13,7 @@ import { claimExternalSearch } from "@/domain/offers";
 import { createInvite, createSellerOrder, createTask, getComparison, selectOffer } from "@/domain/tasks";
 import { getTaskView } from "@/domain/view";
 import { deriveChannelToken, senderHash } from "./bridge";
-import { handleJoinOrStop } from "./join";
+import { admitted, handleJoinOrStop } from "./join";
 import { menuCards, renderChosen, renderOptions } from "./render";
 import { allowedSenders, channelIds, getChannel, isConfigured, type ChannelDef } from "./registry";
 
@@ -68,7 +68,7 @@ export function parseInbound(def: ChannelDef, b: Record<string, unknown>): Inbou
 
 // Persist first, process later: a restart or retry can never lose or repeat a message
 export async function enqueueInbound(channel: string, m: InboundInput): Promise<"accepted" | "duplicate" | "ignored"> {
-  if (!allowedSenders(channel).has(m.sender)) return "ignored";
+  if (!allowedSenders(channel).has(m.sender) && !(await admitted(channel, m.sender, m.text))) return "ignored";
   return tx(async (c) => {
     const r = await c.query(
       `INSERT INTO channel_inbox (id,channel,provider_message_id,sender,body,image_mime,image_b64,received_at,place_county,place_area,contact_name)

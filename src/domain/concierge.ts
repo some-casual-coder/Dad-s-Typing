@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Payments } from "@/adapters/types";
 import { sealRecipient } from "@/channel/bridge";
-import { queueUpdates } from "@/channel/updates";
+import "@/channel/deliver";
+import { noticesFor, publish } from "@/notify";
 import { formatRange, type Eta } from "@/delivery/eta";
 import { freight } from "@/delivery/estimate";
 import { FX_BUFFER_PCT, type FxTable } from "@/delivery/fx";
@@ -85,7 +86,7 @@ async function addEvent(c: Tx, orderId: string, taskId: string, status: Status, 
   );
   if (!r.rowCount) return false;
   const latest = eta ?? (await c.query(`SELECT eta FROM concierge_orders WHERE seller_order_id=$1`, [orderId])).rows[0]?.eta ?? null;
-  await queueUpdates(c, { eventId: r.rows[0].id, orderId, taskId, status, eta: latest });
+  await publish(c, { eventId: r.rows[0].id, orderId, taskId, status, eta: latest });
   return true;
 }
 
@@ -225,6 +226,7 @@ export async function timeline(c: Tx, taskId: string, roles: string[]) {
   const next = closed || reached.has("delivered") ? [] : PROGRESS.filter((s) => !reached.has(s))
     .filter((s) => (o.breakdown as Component[]).some((x) => x.key === "kenya_delivery" && x.label.startsWith("Pickup")) ? s !== "out_for_delivery" : s !== "ready_to_collect");
   return {
+    notices: await noticesFor(c, taskId, payer),
     arrival: eta && !closed ? formatRange(eta.earliest, eta.latest) : null,
     done: evs.filter((e) => payer || e.status !== "settled").map((e) => ({
       status: e.status as Status, text: STATUS_TEXT[e.status as Status], at: new Date(e.occurred_at).toISOString(),

@@ -24,6 +24,26 @@ export default function StatusTimeline({ taskId, token, f, onChanged }: { taskId
         ))}
         {f.next.map((t, i) => <li key={`n${i}`} className="next muted">{t}</li>)}
       </ol>
+      {f.notices.length > 0 && (
+        <div className="stack">
+          <h3>Messages</h3>
+          <ul className="notices">
+            {f.notices.map((n, i) => (
+              <li key={i} className="notice">
+                <p>{n.body}</p>
+                {(n.place?.mapsUrl || n.contact) && (
+                  <p className="small">
+                    {n.place?.mapsUrl && <a href={n.place.mapsUrl} target="_blank" rel="noopener noreferrer">Open the map{n.place.pin?.approximate ? " (approximate)" : ""}</a>}
+                    {n.place?.mapsUrl && n.contact && " · "}
+                    {n.contact && <a href={`tel:${n.contact.phone}`}>Call {n.contact.name}</a>}
+                  </p>
+                )}
+                <p className="muted small">{new Date(n.at).toLocaleString("en-KE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {m?.extraDueMinor && !m.extraDecision && (
         <div className="note stack">
           <p>The provider&apos;s final bill is {formatMoney(m.extraDueMinor, m.currency)} above the cap you paid. Approve the extra, or decline and we will sort it out with you.</p>
