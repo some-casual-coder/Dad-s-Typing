@@ -30,6 +30,9 @@ export interface SharedSource {
   id: string; platform: string; label: string; kind: string; openUrl: string; status: string; reason: string | null;
   evidence: string[]; candidates: Candidate[];
 }
+export interface RouteOption {
+  planId: string; provider: string; title: string; totalMinor: number; estimateMinor: number; arrival: string | null;
+}
 export interface OrderPreview {
   selectionId: string;
   changed?: { offerId: string; currency: string; toMinor: number | null };
@@ -38,6 +41,7 @@ export interface OrderPreview {
     kind: "merchant" | "concierge"; title: string; seller: string; currency: string; totalMinor: number;
     itemMinor?: number; shippingMinor?: number; estimateMinor?: number; provider?: string; rule?: string;
     kesPerUsdMicro?: number | null; arrival?: string | null;
+    planId?: string; options?: RouteOption[];
     lines?: { label: string; status: string; currency: string; minor: number | null; highMinor: number | null }[];
   };
 }
@@ -168,6 +172,8 @@ export const api = {
   createOrder: (id: string, token: string, selectionId: string, expectedTotalMinor?: number) =>
     call<OrderView>("POST", `${t(id)}/order`, { token, body: { selectionId, expectedTotalMinor } }),
   previewOrder: (id: string, token: string) => call<OrderPreview>("GET", `${t(id)}/order`, { token }),
+  chooseRoute: (id: string, token: string, planId: string) =>
+    call<OrderPreview>("POST", `${t(id)}/selection/route-choice`, { token, body: { planId } }),
   payCreate: (id: string, token: string, orderId: string) =>
     call<{ attemptId: string; paypalOrderId: string; approveUrl: string }>(
       "POST", `${t(id)}/pay/create`, { token, body: { orderId } }),

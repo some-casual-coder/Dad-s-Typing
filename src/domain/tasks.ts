@@ -221,20 +221,48 @@ export async function selectOffer(taskId: string, token: string, input: { offerI
   });
 }
 
-// An import is priced fresh before freezing: price, FX and stock can move after choosing
-async function conciergePlan(taskId: string, token: string, offerId: string) {
+// An import is priced fresh before freezing: price, FX and stock can move after
+// choosing. The payer's chosen route wins while it is still payable.
+async function conciergePlan(taskId: string, token: string, offerId: string, planId?: string | null) {
   const { getDelivery } = await import("./delivery");
   const d = await getDelivery(taskId, token);
   const card = [...d.cards.closest, ...d.cards.similar, ...d.cards.more].find((x) => x.offerId === offerId);
-  const plan = d.plans.find((p) => p.id === card?.planId) ?? d.plans.find((p) => p.offerId === offerId && p.primary);
-  return plan ? { plan, fx: d.fx } : null;
+  const routes = d.plans.filter((p) => p.offerId === offerId).flatMap((p) => {
+    try { return [{ plan: p, usd: conciergeQuote(p, d.fx) }]; } catch { return []; }
+  });
+  const picked = routes.find((r) => r.plan.id === planId)?.plan;
+  const plan = picked ?? d.plans.find((p) => p.id === card?.planId) ?? d.plans.find((p) => p.offerId === offerId && p.primary);
+  // Every payable way to get it, cheapest first, with the price each would charge
+  const options = routes.sort((a, b) => a.usd.high - b.usd.high).map((r) => ({
+    planId: r.plan.id, provider: r.plan.provider, title: r.plan.title, totalMinor: r.usd.high, estimateMinor: r.usd.low,
+    arrival: r.plan.eta ? formatRange(r.plan.eta.earliest, r.plan.eta.latest) : null }));
+  return plan ? { plan, fx: d.fx, options } : null;
+}
+
+// The payer switches carrier before paying; the price is worked out again
+export async function chooseRoute(taskId: string, token: string, planId: string) {
+  const s = await tx(async (c) => {
+    await authorize(c, taskId, token, "review_order");
+    const row = (await c.query(`SELECT id, offer_id FROM selections WHERE task_id=$1 AND superseded_at IS NULL FOR UPDATE`, [taskId])).rows[0];
+    if (!row) throw new DomainError("not_found", "Nothing chosen yet");
+    if ((await c.query(`SELECT 1 FROM seller_orders WHERE selection_id=$1 AND kind <> 'topup'`, [row.id])).rowCount)
+      throw new DomainError("conflict", "The order is already placed; the carrier can't change now");
+    return row as { id: string; offer_id: string };
+  });
+  const imp = await conciergePlan(taskId, token, s.offer_id, planId);
+  if (!imp?.options.some((o) => o.planId === planId)) throw new DomainError("invalid", "That way of delivering isn't available for this item");
+  await tx(async (c) => {
+    await c.query(`UPDATE selections SET plan_id=$2 WHERE id=$1`, [s.id, planId]);
+    await logEvent(c, taskId, null, "selection.route", { planId });
+  });
+  return previewOrder(taskId, token);
 }
 
 // What the payer would be charged for the current choice. Read-only: no
 // order, no PayPal call; Pay creates both and checks the amount still holds.
 export async function previewOrder(taskId: string, token: string) {
   await tx((c) => authorize(c, taskId, token, "review_order"));
-  const s = (await pool.query(`SELECT s.id, s.offer_id, s.offer_snapshot FROM selections s WHERE s.task_id=$1 AND s.superseded_at IS NULL`, [taskId])).rows[0];
+  const s = (await pool.query(`SELECT s.id, s.offer_id, s.offer_snapshot, s.plan_id FROM selections s WHERE s.task_id=$1 AND s.superseded_at IS NULL`, [taskId])).rows[0];
   if (!s) throw new DomainError("not_found", "Nothing chosen yet");
   const existing = (await pool.query(`SELECT * FROM seller_orders WHERE selection_id=$1 AND kind <> 'topup'`, [s.id])).rows[0];
   if (existing) return { selectionId: s.id as string, order: orderView(existing) };
@@ -251,19 +279,19 @@ export async function previewOrder(taskId: string, token: string) {
     return { selectionId: s.id as string, quote: { kind: "merchant" as const, title: snap.title as string, seller: snap.seller as string, currency: snap.currency as string,
       itemMinor: snap.unitPriceMinor as number, shippingMinor: snap.shippingMinor as number, totalMinor: orderTotal(snap.unitPriceMinor, snap.shippingMinor) } };
   }
-  const imp = await conciergePlan(taskId, token, s.offer_id);
+  const imp = await conciergePlan(taskId, token, s.offer_id, s.plan_id);
   if (!imp) throw new DomainError("not_payable", "This option is bought at the store");
   const usd = conciergeQuote(imp.plan, imp.fx);
   const eta = imp.plan.eta;
   return { selectionId: s.id as string, quote: { kind: "concierge" as const, title: snap.title as string, seller: CONCIERGE_SELLER, currency: "USD",
     totalMinor: usd.high, estimateMinor: usd.low, provider: imp.plan.provider, rule: SETTLEMENT_RULE, kesPerUsdMicro: imp.fx.USD?.kesPerUnitMicro ?? null,
-    arrival: eta ? formatRange(eta.earliest, eta.latest) : null,
+    arrival: eta ? formatRange(eta.earliest, eta.latest) : null, planId: imp.plan.id, options: imp.options,
     lines: imp.plan.components.filter((x) => x.status !== "not_applicable").map((x) => ({ label: x.label, status: x.status, currency: x.currency, minor: x.minor ?? null, highMinor: x.highMinor ?? null })) } };
 }
 
 export async function createSellerOrder(taskId: string, token: string, input: { selectionId: string; expectedTotalMinor?: number }) {
-  const peek = (await pool.query(`SELECT offer_id, offer_snapshot->>'route' AS route FROM selections WHERE id=$1 AND task_id=$2`, [input.selectionId, taskId])).rows[0];
-  const imp = peek?.route === "external" ? await conciergePlan(taskId, token, peek.offer_id) : null;
+  const peek = (await pool.query(`SELECT offer_id, plan_id, offer_snapshot->>'route' AS route FROM selections WHERE id=$1 AND task_id=$2`, [input.selectionId, taskId])).rows[0];
+  const imp = peek?.route === "external" ? await conciergePlan(taskId, token, peek.offer_id, peek.plan_id) : null;
   return tx(async (c) => {
     const g = await authorize(c, taskId, token, "review_order");
     const t = (await c.query(`SELECT version, cancelled_at FROM tasks WHERE id=$1 FOR UPDATE`, [taskId])).rows[0];

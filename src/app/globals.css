@@ -116,9 +116,16 @@ details { min-width: 0; }
 .dcard .btn { justify-self: stretch; }
 .more summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 700; }
 .parts { margin: 0; padding-left: 18px; display: grid; gap: 4px; overflow-wrap: anywhere; }
-.timeline { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
-.timeline li.done::marker { content: "● "; color: var(--ok); }
-.timeline li.next::marker { content: "○ "; }
+/* Tracking: a vertical line of steps, like the receipt on the website */
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; }
+.timeline li, .timeline li.next { position: relative; display: block; padding: 0 0 16px 28px; background: none; border-radius: 0; min-width: 0; }
+.timeline li::before { content: ""; position: absolute; left: 3px; top: .35em; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); background: #fff; box-sizing: border-box; }
+.timeline li::after { content: ""; position: absolute; left: 9px; top: calc(.35em + 16px); bottom: 0; width: 2px; background: var(--line); }
+.timeline li:last-child { padding-bottom: 0; } .timeline li:last-child::after { display: none; }
+.timeline li.done::before { background: var(--accent); border-color: var(--accent); }
+.timeline li.done::after { background: color-mix(in srgb, var(--accent) 45%, white); }
+.timeline li.done + li.next::before { border-color: var(--coral); background: color-mix(in srgb, var(--coral) 18%, white); }
+.timeline li.done + li.next { color: var(--ink); font-weight: 600; }
 .notices { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .notice { border-left: 3px solid var(--accent); padding: 6px 10px; display: grid; gap: 4px; background: var(--accent-2); border-radius: 0 10px 10px 0; }
 .notice a { color: var(--accent); font-weight: 700; }
@@ -142,3 +149,13 @@ details.card > summary { cursor: pointer; min-height: 44px; display: flex; flex-
 .cost:last-child { border-bottom: 0; }
 .cost dt { color: var(--ink); min-width: 0; }
 .cost dd { margin: 0; font-weight: 600; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Carrier choice at checkout: a radio list, the price updates on pick */
+.routes { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.routes legend { font-size: .72rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; padding: 0; }
+.route { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; cursor: pointer; min-height: 56px; }
+.route.on { border: 2px solid var(--accent); background: var(--accent-2); }
+.route input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.route-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.route-price { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; display: grid; justify-items: end; gap: 2px; }
+.routes:disabled .route { opacity: .7; cursor: progress; }

@@ -250,3 +250,31 @@ describe("pay: a price change after the choice needs a fresh review", () => {
     expect((await createSellerOrder(me.taskId, me.token, { selectionId: again.selectionId, expectedTotalMinor: 5700 })).totalMinor).toBe(5700);
   });
 });
+
+describe("pay: the payer picks the carrier", () => {
+  it("lists every payable route cheapest first; a pick reprices the checkout and the order uses it", async () => {
+    gate.payments = mk();
+    const { previewOrder, chooseRoute } = await import("@/domain/tasks");
+    const me = await createTask({ title: "Cat carrier", starterRoles: ["requester", "chooser", "payer"], starterLabel: "Me" });
+    await recordOffers(me.taskId, [{ source: "channel3", sourceOfferId: `RT-${key()}`, route: "external", seller: "amazon.com", title: "Sherpa cat carrier",
+      unitPriceMinor: 3000, currency: "USD", availability: "InStock", url: "https://www.amazon.com/dp/B012345678", specs }]);
+    const cmp = await getComparison(me.taskId, me.token);
+    const sel = await selectOffer(me.taskId, me.token, { offerId: cmp.offers[0].id, expectedVersion: cmp.version }, { idempotencyKey: key() });
+    const first = (await previewOrder(me.taskId, me.token)).quote!;
+    expect(first.options!.length).toBeGreaterThan(1);
+    const totals = first.options!.map((o) => o.totalMinor);
+    expect(totals).toEqual([...totals].sort((a, b) => a - b));
+    expect(first.options!.map((o) => o.planId)).toContain(first.planId);
+    // Pick a different route: the total and the lines follow it
+    const other = first.options!.find((o) => o.planId !== first.planId)!;
+    const after = (await chooseRoute(me.taskId, me.token, other.planId)).quote!;
+    expect(after.planId).toBe(other.planId);
+    expect(after.totalMinor).toBe(other.totalMinor);
+    expect(after.provider).toBe(other.provider);
+    // An unknown route is refused; the order freezes the picked one
+    await expect(chooseRoute(me.taskId, me.token, "nope:kentex:x")).rejects.toMatchObject({ code: "invalid" });
+    const o = await createSellerOrder(me.taskId, me.token, { selectionId: sel.selectionId, expectedTotalMinor: other.totalMinor });
+    expect(o.totalMinor).toBe(other.totalMinor);
+    await expect(chooseRoute(me.taskId, me.token, first.planId!)).rejects.toMatchObject({ code: "conflict" });
+  });
+});

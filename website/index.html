@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dad’s Typing</title>
 <meta name="description" content="Shopping starts in the family chat. Send a photo, let Mum choose, pay once with PayPal, keep the receipt with the request.">
-<link rel="icon" href="favicon.ico?v=2" sizes="any">
-<link rel="icon" type="image/png" sizes="32x32" href="img/logo/favicon-32.png?v=2">
+<link rel="icon" href="favicon.ico?v=3" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="img/logo/favicon-32.png?v=3">
 <link rel="apple-touch-icon" href="img/logo/apple-touch-icon.png?v=2">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -77,8 +77,8 @@ p { margin: 0; }
 /* Header */
 .top {
   position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
-  background: color-mix(in srgb, var(--paper) 86%, transparent); backdrop-filter: blur(10px);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  background: color-mix(in srgb, var(--cream) 92%, transparent); backdrop-filter: blur(10px);
+  border-bottom: 1px solid color-mix(in srgb, #E9DCC3 70%, transparent);
 }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px; }
 .brand { display: inline-flex; align-items: center; gap: .4em; font: 700 1.4rem/1 var(--display); text-decoration: none; color: var(--ink); }
@@ -143,7 +143,12 @@ section { scroll-margin-top: 72px; }
 @media (max-width: 480px) { .stories { grid-template-columns: 1fr; } }
 
 /* How it works */
-.how { background: var(--paper); border-block: 1px solid var(--line); }
+.how { position: relative; isolation: isolate; background: var(--paper); }
+.how::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: url(img/cream-paper-background.webp) center/cover no-repeat; opacity: .55;
+  -webkit-mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent); mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent);
+}
 .hero, .close { background: var(--cream); }
 .how .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 5vw, 64px); align-items: center; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; counter-reset: s; }
@@ -249,6 +254,14 @@ section { scroll-margin-top: 72px; }
 .btn-wa:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--lilac) 85%, var(--on-green)); }
 .btn-light { background: transparent; color: var(--on-green); border-color: color-mix(in srgb, var(--on-green) 55%, transparent); }
 .btn-light:hover { background: color-mix(in srgb, var(--on-green) 10%, transparent); }
+.path { display: grid; gap: 12px; padding: 20px; border-radius: 20px; min-width: 0;
+  background: color-mix(in srgb, var(--on-green) 6%, transparent); border: 1px solid color-mix(in srgb, var(--on-green) 16%, transparent); }
+.path-wa { background: color-mix(in srgb, var(--lilac) 14%, transparent); border-color: color-mix(in srgb, var(--lilac) 45%, transparent); }
+.path-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.path-head h3 { margin: 0; font-size: 1.2rem; }
+.path-n { width: 1.9em; height: 1.9em; border-radius: 50%; display: grid; place-items: center; font: 600 .9rem/1 var(--body); background: var(--on-green); color: var(--green); flex: none; }
+.chip { margin-left: auto; font: 600 .7rem/1 var(--body); letter-spacing: .1em; text-transform: uppercase; padding: .45em .8em; border-radius: 999px; background: var(--lilac); color: var(--ink); }
+.chip-soft { background: color-mix(in srgb, var(--on-green) 14%, transparent); color: var(--on-green); }
 .guide .aside { font-size: .92rem; color: color-mix(in srgb, var(--on-green) 75%, transparent); }
 .walk { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: w; }
 .walk li {
@@ -490,21 +503,21 @@ footer .wrap { display: grid; gap: 18px; }
       <div class="prep">
         <p class="eyebrow">Walkthrough</p>
         <h2 id="guide-h">Try it yourself</h2>
-        <p class="lede">The quickest way is WhatsApp. For the whole journey, with Mum choosing and you paying, follow the steps in the web app. It takes about ten minutes.</p>
-        <h3>On WhatsApp</h3>
-        <p>Your first message is already typed. Press send and My Plug explains how it works.</p>
-        <div class="ctas">
-          <a class="btn btn-wa" href="https://wa.me/254102307457?text=Hi%20My%20Plug!%20I%27d%20like%20to%20try%20it%20out." target="_blank" rel="noopener">Chat with My Plug</a>
+        <p class="lede">Two ways in. WhatsApp is the quickest; the web app shows the whole journey, with Mum choosing and you paying.</p>
+        <div class="path path-wa">
+          <div class="path-head"><span class="path-n">1</span><h3>On WhatsApp</h3><span class="chip">Quickest</span></div>
+          <p>Your first message is already typed. Press send and My Plug explains how it works.</p>
+          <div class="ctas"><a class="btn btn-wa" href="https://wa.me/254102307457?text=Hi%20My%20Plug!%20I%27d%20like%20to%20try%20it%20out." target="_blank" rel="noopener">Chat with My Plug</a></div>
         </div>
-        <h3>In the web app</h3>
-        <p>You play two people: the one shopping, and Mum. You’ll need:</p>
-        <ul>
-          <li>Two browser windows that don’t share a sign-in: a normal one for you, a private one for Mum.</li>
-          <li>A PayPal Sandbox personal buyer login. It’s a test account, so no real money moves.</li>
-          <li>A photo of what you want. No photo? The app has a sample carrier drawing to download.</li>
-        </ul>
-        <div class="ctas">
-          <a class="btn btn-light" href="https://dads-typing.onrender.com" target="_blank" rel="noopener">Open the web app</a>
+        <div class="path">
+          <div class="path-head"><span class="path-n">2</span><h3>In the web app</h3><span class="chip chip-soft">About 10 min</span></div>
+          <p>You play two people: the one shopping, and Mum. You’ll need:</p>
+          <ul>
+            <li>Two browser windows that don’t share a sign-in: a normal one for you, a private one for Mum.</li>
+            <li>A PayPal Sandbox personal buyer login. It’s a test account, so no real money moves.</li>
+            <li>A photo of what you want, or the sample carrier drawing in the app.</li>
+          </ul>
+          <div class="ctas"><a class="btn btn-light" href="https://dads-typing.onrender.com" target="_blank" rel="noopener">Open the web app</a></div>
         </div>
         <p class="aside">Open it in your normal window, then follow the steps. The code is on <a href="https://github.com/some-casual-coder/Dad-s-Typing" target="_blank" rel="noopener">GitHub</a>.</p>
       </div>

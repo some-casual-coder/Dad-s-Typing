@@ -47,8 +47,18 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
     }
   }
 
+  async function pickRoute(planId: string) {
+    if (busy || planId === p?.quote?.planId) return;
+    setBusy(true); setErr("");
+    try { setP(await api.chooseRoute(taskId, token, planId)); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Could not change the carrier."); }
+    finally { setBusy(false); }
+  }
+
   if (!sel) return null;
   const q = p?.quote;
+  const routes = !order && q?.options && q.options.length > 1 ? q.options : null;
+  const cheapest = routes ? Math.min(...routes.map((r) => r.totalMinor)) : 0;
   const total = order ? { minor: order.totalMinor, currency: order.currency } : q ? { minor: q.totalMinor, currency: q.currency } : null;
   const concierge = order ? order.kind === "concierge" : q?.kind === "concierge";
   const c = order?.concierge;
@@ -62,6 +72,24 @@ export default function PayerPanel({ taskId, token, view, onChanged }: Props) {
       <p className="small">From {concierge ? "Dad's Typing concierge (sandbox)" : order?.seller ?? q?.seller ?? sel.seller} · Quantity 1</p>
       {concierge && <p className="small">We buy it through {(c?.provider ?? q?.provider) === "aquantuo" ? "Aquantuo" : "Kentex"} and deliver it to you in Kenya.</p>}
       {arrival && <p>Arrives {arrival} <span className="muted small">(estimate)</span></p>}
+      {routes && (
+        <fieldset className="routes" disabled={busy}>
+          <legend>How it gets to you</legend>
+          {routes.map((r) => (
+            <label key={r.planId} className={`route${r.planId === q?.planId ? " on" : ""}`}>
+              <input type="radio" name="route" checked={r.planId === q?.planId} onChange={() => void pickRoute(r.planId)} />
+              <span className="route-main">
+                <b>{r.provider === "aquantuo" ? "Aquantuo" : r.provider === "kentex" ? "Kentex" : r.provider}</b>
+                <span className="small muted">{r.title}{r.arrival ? ` · ${r.arrival}` : ""}</span>
+              </span>
+              <span className="route-price">
+                {formatMoney(r.totalMinor, "USD")}
+                {r.totalMinor === cheapest && <span className="tag">Cheapest</span>}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       {lines && lines.length > 0 && (
         <div className="checkout">
           <p className="checkout-h">Costs</p>

@@ -503,7 +503,11 @@ describe("the whole journey in chat", () => {
       const att = await beginAttempt(id.task_id, token, view.order!.id);
       await recordProviderOrder(att.id, "PP-CHAT-1");
       await settleCapture(att.id, { paypalOrderId: "PP-CHAT-1", captureId: "CAPCHAT00001", status: "COMPLETED", amountMinor: view.order!.totalMinor, currency: "USD", payeeMerchantId: "MERCH1" });
-      expect((await outbox()).at(-1)).toMatch(/^Payment received for the Sherpa cat carrier\./);
+      // Paid, then the receipt link, then a tip to pin it or share a view with the person it's for
+      const [paid, receipt, tip] = (await outbox()).slice(-3);
+      expect(paid).toMatch(/^Payment received for the Sherpa cat carrier\./);
+      expect(receipt).toMatch(/^Your receipt and tracking: https?:\/\/\S+\/t\/[0-9a-f-]+#k=/);
+      expect(tip).toMatch(/^Tip: pin this chat.+\*Share\*/);
       const { recordFulfilment } = await import("@/domain/concierge");
       await recordFulfilment({} as never, { orderId: view.order!.id, status: "ordered", source: "operator", key: "chat-ordered-1" });
       expect((await outbox()).at(-1)).toBe("I've ordered the Sherpa cat carrier from the store. Next stop: Kentex's US warehouse.");
