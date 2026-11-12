@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dad’s Typing</title>
 <meta name="description" content="Shopping starts in the family chat. Send a photo, let Mum choose, pay once with PayPal, keep the receipt with the request.">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="img/logo/favicon-32.png">
+<link rel="apple-touch-icon" href="img/logo/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,600&display=swap">
@@ -78,8 +81,9 @@ p { margin: 0; }
   border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
 }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px; }
-.brand { display: inline-flex; align-items: baseline; gap: .15em; font: 700 1.4rem/1 var(--display); text-decoration: none; color: var(--ink); }
-.brand .dots { font-size: 1.1em; color: var(--coral); margin-left: .1em; }
+.brand { display: inline-flex; align-items: center; gap: .4em; font: 700 1.4rem/1 var(--display); text-decoration: none; color: var(--ink); }
+.brand .mark { width: 1.45em; height: 1.45em; flex: none; }
+.foot-brand { font-size: 1rem; }
 .nav { display: flex; align-items: center; gap: clamp(10px, 2.4vw, 28px); }
 .nav a.link { text-decoration: none; font-weight: 500; color: var(--muted); }
 .nav a.link:hover { color: var(--ink); }
@@ -298,7 +302,7 @@ footer .wrap { display: grid; gap: 18px; }
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="brand" href="#top" aria-label="Dad’s Typing, back to top">Dad’s typing<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></a>
+    <a class="brand" href="#top" aria-label="Dad’s Typing, back to top"><img class="mark" src="img/logo/mark.png" width="128" height="128" alt="">Dad’s typing</a>
     <nav class="nav" aria-label="Sections">
       <a class="link" href="#stories">Stories</a>
       <a class="link" href="#how">How it works</a>
@@ -437,7 +441,7 @@ footer .wrap { display: grid; gap: 18px; }
       <div class="pay-grid">
         <article class="slip rise" aria-label="Example receipt for an imported cat carrier">
           <div class="slip-head">
-            <span class="brand">Dad’s typing<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>
+            <span class="brand"><img class="mark" src="img/logo/mark.png" width="128" height="128" alt="">Dad’s typing</span>
             <small>Receipt DT-4F7A<br>12 Nov 2026, 18:42</small>
           </div>
           <span class="stamp" aria-hidden="true">PAID</span>
@@ -565,7 +569,7 @@ footer .wrap { display: grid; gap: 18px; }
       <a class="logo" href="https://render.com" target="_blank" rel="noopener"><img src="img/logos/render.svg" width="24" height="24" alt="">Render</a>
     </div>
     <div class="foot-row">
-      <span>Dad’s typing<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></span>
+      <span class="brand foot-brand"><img class="mark" src="img/logo/mark.png" width="128" height="128" alt="">Dad’s typing</span>
       <span>Shopping that starts in the family chat.</span>
       <a class="foot-link" href="https://github.com/some-casual-coder/Dad-s-Typing" target="_blank" rel="noopener">Source code on GitHub</a>
     </div>
