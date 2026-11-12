@@ -77,7 +77,9 @@ services:
       - { key: HUB_AQUANTUO_ADDRESS, sync: false }
       - { key: HUB_AQUANTUO_PHONE, sync: false }
       - { key: HUB_AQUANTUO_HOURS, sync: false }
-      - { key: WHATSAPP_BOT_NUMBER, sync: false }      # set after pairing
+      - { key: WHATSAPP_BOT_NUMBER, sync: false }      # the paired My Plug number
+      - key: CHANNEL_OPEN_START
+        value: "1"                                     # the website's "Hi My Plug" opener admits new numbers
       - { key: WHATSAPP_ALLOWED_SENDERS, sync: false } # set after pairing
 
   # WhatsApp connector (Go, whatsmeow). Talks to the app over the private network.
