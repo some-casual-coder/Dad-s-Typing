@@ -1,5 +1,6 @@
 import type { OfferSpecs } from "@/adapters/types";
 import type { Identity } from "./identity";
+import type { ParcelEstimate } from "./packaging";
 
 export type CostStatus = "known" | "estimated" | "included" | "unknown" | "not_applicable";
 export type Provider = "aquantuo" | "kentex";
@@ -18,6 +19,7 @@ export interface Component {
   note?: string;
   source: string;
   asOf: string;
+  confidence?: "high" | "medium" | "low";
 }
 
 export interface Parcel {
@@ -75,6 +77,7 @@ export interface ImportedQuote {
 
 export interface Handoff {
   officialUrl: string;
+  trackingUrl: string;
   fields: { label: string; value: string }[];
   steps: string[];
   // Details the provider form needs that we do not have yet
@@ -97,6 +100,10 @@ export interface Plan {
   why: string;
   components: Component[];
   complete: boolean;
+  // The method we pick for this offer; the rest are "other ways"
+  primary: boolean;
+  confidence: "high" | "medium" | "low";
+  parcel: ParcelEstimate | null;
   // Priced parts in one currency; null when none is priced or currencies differ
   knownMinor: number | null;
   knownHighMinor: number | null;

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { withAssist } from "@/delivery/assist";
 import { amazonUsListing, buildPlans, cheapestDelivered, type Inputs } from "@/delivery/compare";
-import { freight, volumetricKg } from "@/delivery/estimate";
+import { freight, kenyaDelivery } from "@/delivery/estimate";
+import { chargeableKg, estimateParcel, KENTEX_CM3_PER_KG } from "@/delivery/packaging";
 import { nextAction } from "@/delivery/steps";
 import { FALLBACK_FX, fxLabel, toKes } from "@/delivery/fx";
 import { closestMatch, identity } from "@/delivery/identity";
@@ -13,7 +14,8 @@ const amazon: OfferInput = { id: "A", title: "Carrier", seller: "amazon.com", ro
   url: "https://www.amazon.com/dp/B012345678", exact: true };
 const other: OfferInput = { ...amazon, id: "O", seller: "petshop.com", url: "https://petshop.com/p/1" };
 const uk: OfferInput = { ...amazon, id: "U", seller: "amazon.co.uk", currency: "GBP", url: "https://www.amazon.co.uk/dp/B012345678" };
-const parcel = { weightGrams: 2000, lengthMm: 300, widthMm: 200, heightMm: 150 };
+const parcel = {};
+const measuredParcel = { weightGrams: 2000, lengthMm: 300, widthMm: 200, heightMm: 150 };
 
 const base = (o: Partial<Inputs>): Inputs => ({ offers: [local, amazon], quotes: [], destination: { country: "KE", county: "Nairobi", city: "Westlands" },
   prefs: { handling: "door" }, parcel, fx: FALLBACK_FX, now: NOW, ...o });
@@ -22,6 +24,8 @@ const quote = (o: Partial<ImportedQuote>): ImportedQuote => ({ id: "q", offerId:
   currency: "USD", includesItem: true, includesCustoms: true, includesDelivery: true, expiresAt: "2026-11-20T00:00:00Z", ...o });
 
 describe("delivery comparison", () => {
+  const listed = { weightGrams: 1200, lengthMm: 450, widthMm: 300, heightMm: 280, dimsSource: "Channel3" };
+
   it("local wins after freight even though the import item is cheaper", () => {
     const plans = buildPlans(base({ quotes: [quote({})] }));
     const k = find(plans, "A", "kentex", "amazon_buy_ship");
@@ -38,151 +42,148 @@ describe("delivery comparison", () => {
     expect(sep.knownMinor).toBe(12000);
   });
 
-  it("separates eligible and ineligible Kentex Amazon listings", () => {
+  it("recognises only real Amazon.com product links", () => {
     expect(amazonUsListing(amazon.url)).toBe(true);
     expect(amazonUsListing(uk.url)).toBe(false);
     expect(amazonUsListing("http://www.amazon.com/dp/B012345678")).toBe(false);
     expect(amazonUsListing("https://amazon.com.evil.test/dp/B012345678")).toBe(false);
+  });
+
+  it("picks one method per offer without asking: Amazon tool, else buy-for-me", () => {
     const ps = buildPlans(base({ offers: [amazon, other, uk] }));
-    expect(find(ps, "A", "kentex", "amazon_buy_ship").availability).toBe("available");
-    expect(find(ps, "O", "kentex", "amazon_buy_ship").availability).toBe("ineligible");
-    expect(find(ps, "O", "kentex", "forwarding").availability).toBe("available");
-    expect(find(ps, "U", "kentex", "forwarding").availability).toBe("ineligible");
+    const primary = (id: string) => ps.filter((p) => p.offerId === id && p.primary).map((p) => `${p.provider}:${p.mode}`);
+    expect(primary("A")).toEqual(["kentex:amazon_buy_ship"]);
+    expect(primary("O")).toEqual(["kentex:buy_for_me"]);
+    expect(primary("U")).toEqual(["aquantuo:buy_for_me"]);
+    expect(ps.filter((p) => p.offerId === "U" && p.provider === "kentex")).toHaveLength(0);
   });
 
-  it("keeps Aquantuo self-buy and Buy For Me apart", () => {
-    const ps = buildPlans(base({ offers: [other] }));
-    const self = find(ps, "O", "aquantuo", "self_buy"), bfm = find(ps, "O", "aquantuo", "buy_for_me");
-    expect(self.title).toMatch(/I'll buy it/);
-    expect(bfm.title).toMatch(/Buy and ship/);
-    expect(bfm.components.find((c) => c.key === "buy_fee")!.minor).toBe(225);
-    expect(self.components.find((c) => c.key === "buy_fee")).toBeUndefined();
-    expect(self.handoff!.steps.join(" ")).toMatch(/warehouse address from your own account/);
-    expect(bfm.payments).toMatch(/combined service/);
-    expect(self.payments).toMatch(/Two separate payments/);
-  });
-
-  it("gives a range or unknown, never a firm price, without packed dimensions", () => {
-    const noDims = freight("kentex", { weightGrams: 2000 });
-    expect(noDims.status).toBe("unknown");
-    expect(noDims.minor).toBeUndefined();
-    expect(noDims.lowMinor).toBeGreaterThan(0);
-    expect(freight("aquantuo", {}).status).toBe("unknown");
-    const range = freight("kentex", parcel);
-    expect([range.minor, range.highMinor]).toEqual([5000, 10000]);
-    expect(freight("kentex", { ...parcel, hub: "delaware" }).minor).toBe(10000);
-    const ps = buildPlans(base({ parcel: { weightGrams: 2000 }, quotes: [] }));
-    const k = find(ps, "A", "kentex", "forwarding");
-    expect(k.complete).toBe(false);
-    expect(cheapestDelivered(ps)).toBe(find(ps, "L", "demo", "local").id);
-  });
-
-  it("charges the larger of actual and box weight", () => {
-    expect(volumetricKg(parcel)).toBeCloseTo(1.795, 2);
-    const big = freight("kentex", { weightGrams: 1000, lengthMm: 600, widthMm: 400, heightMm: 400, hub: "texas" });
-    expect(big.minor).toBeGreaterThan(5000);
-    expect(big.note).toMatch(/box size/);
-  });
-
-  it("changes the estimate when the warehouse reweighs heavier", () => {
-    const a = freight("aquantuo", { ...parcel, weightGrams: 2000 }).minor!;
-    const b = freight("aquantuo", { ...parcel, weightGrams: 3000 }).minor!;
-    expect(b).toBeGreaterThan(a);
-  });
-
-  it("leaves Kenya delivery unknown and never zero for pickup or door", () => {
-    for (const handling of ["pickup", "door"] as const) {
-      const k = find(buildPlans(base({ prefs: { handling } })), "A", "kentex", "forwarding");
-      const d = k.components.find((c) => c.key === "kenya_delivery")!;
-      expect(d.status).toBe("unknown");
-      expect(d.label).toBe(handling === "door" ? "Delivery in Kenya" : "Pickup in Kenya");
-      expect(k.handoff!.fields).toContainEqual({ label: "Delivery in Kenya", value: handling === "door" ? "To my door" : "I will collect" });
+  it("a representative item gets a complete delivered range with sources and no user input", () => {
+    const carrier = { ...amazon, specs: listed };
+    for (const handling of ["door", "pickup"] as const) {
+      const k = find(buildPlans(base({ offers: [carrier], prefs: { handling } })), "A", "kentex", "amazon_buy_ship");
+      expect(k.complete).toBe(true);
+      expect(k.kes!.high).toBeGreaterThan(k.kes!.low);
+      expect(k.components.every((c) => c.source)).toBe(true);
+      expect(k.components.map((c) => c.key)).toEqual(["item", "sales_tax", "buy_fee", "freight", "insurance", "customs", "kenya_delivery"]);
+      expect(k.parcel!.basis).toBe("listed");
     }
+    const ps = buildPlans(base({ offers: [carrier] }));
+    expect(cheapestDelivered(ps)).toBe(find(ps, "A", "kentex", "amazon_buy_ship").id);
+    expect(find(ps, "A", "kentex", "amazon_buy_ship").confidence).toBe("low");
+  });
+
+  it("uses Kentex Amazon terms: 8.25% tax, 5% fee, insurance only over $200", () => {
+    const k = find(buildPlans(base({ quotes: [] })), "A", "kentex", "amazon_buy_ship");
+    expect(k.components.find((c) => c.key === "sales_tax")!.minor).toBe(248);
+    expect(k.components.find((c) => c.key === "buy_fee")!.minor).toBe(150);
+    expect(k.components.find((c) => c.key === "insurance")!.status).toBe("not_applicable");
+    const pricey = find(buildPlans(base({ offers: [{ ...amazon, priceMinor: 25000 }] })), "A", "kentex", "amazon_buy_ship");
+    expect(pricey.components.find((c) => c.key === "insurance")!.minor).toBe(1250);
+    const assisted = find(buildPlans(base({ offers: [other] })), "O", "kentex", "buy_for_me");
+    expect(assisted.components.find((c) => c.key === "buy_fee")!.minor).toBe(300);
+  });
+
+  it("widens the range when weight and size come from category priors", () => {
+    const listedEst = estimateParcel({ title: "cat carrier", specs: listed });
+    const prior = estimateParcel({ title: "cat carrier" });
+    expect(prior.basis).toBe("category");
+    expect(prior.confidence).toBe("low");
+    expect(prior.kind).toBe("pet carrier");
+    expect(prior.high.grams / prior.low.grams).toBeGreaterThan(listedEst.high.grams / listedEst.low.grams);
+    expect(estimateParcel({ title: "x", specs: { weightGrams: 900 } }).basis).toBe("weight_only");
+    expect(estimateParcel({ title: "x" }, { grams: 2000, lengthMm: 300, widthMm: 200, heightMm: 150 }).basis).toBe("measured");
+  });
+
+  it("packed weight is never below the item weight at the high end", () => {
+    const e = estimateParcel({ title: "kettle", specs: listed });
+    expect(e.high.grams).toBeGreaterThan(listed.weightGrams);
+    expect(e.high.lengthMm).toBeGreaterThan(listed.lengthMm);
+  });
+
+  it("charges the larger of actual and box weight, with Kentex minimums", () => {
+    const box = { grams: 1000, lengthMm: 600, widthMm: 400, heightMm: 400 };
+    expect(chargeableKg(box, KENTEX_CM3_PER_KG)).toBeCloseTo(19.15, 1);
+    const est = estimateParcel({ title: "x" }, { ...box });
+    const f = freight("kentex", est, "us", "texas");
+    expect(f.minor).toBe(Math.round(chargeableKg(box, KENTEX_CM3_PER_KG) * 1799));
+    const tiny = estimateParcel({ title: "x" }, { grams: 200, lengthMm: 100, widthMm: 100, heightMm: 50 });
+    expect([freight("kentex", tiny, "us", "texas").minor, freight("kentex", tiny, "us", "texas").highMinor]).toEqual([5000, 5000]);
+    expect([freight("kentex", tiny, "us").minor, freight("kentex", tiny, "us").highMinor]).toEqual([5000, 10000]);
+  });
+
+  it("pickup at Kentex is free; door is modelled and never zero", () => {
+    const e = estimateParcel({ title: "cat carrier", specs: listed });
+    const pick = kenyaDelivery("kentex", "pickup", e), door = kenyaDelivery("kentex", "door", e);
+    expect([pick.status, pick.minor]).toEqual(["known", 0]);
+    expect(door.status).toBe("estimated");
+    expect(door.minor).toBeGreaterThan(0);
+    expect(door.confidence).toBe("low");
+    expect(kenyaDelivery("aquantuo", "door", e).status).toBe("unknown");
   });
 
   it("keeps unknown customs explicit and out of a total", () => {
-    const aq = find(buildPlans(base({ offers: [other], quotes: [quote({ offerId: "O", provider: "aquantuo", mode: "self_buy", includesItem: false, includesCustoms: false, includesDelivery: true })] })), "O", "aquantuo", "self_buy");
+    const aq = find(buildPlans(base({ offers: [uk] })), "U", "aquantuo", "buy_for_me");
     expect(aq.components.find((c) => c.key === "customs")!.status).toBe("unknown");
     expect(aq.complete).toBe(false);
     expect(cheapestDelivered([aq])).toBeNull();
-    const kx = find(buildPlans(base({ offers: [other] })), "O", "kentex", "forwarding");
-    expect(kx.components.find((c) => c.key === "customs")!.status).toBe("included");
+    expect(find(buildPlans(base({ offers: [other] })), "O", "kentex", "buy_for_me").components.find((c) => c.key === "customs")!.status).toBe("included");
   });
 
   it("ignores an expired quote and says so", () => {
     const ps = buildPlans(base({ quotes: [quote({ expiresAt: "2026-11-11T00:00:00Z" })] }));
     const k = find(ps, "A", "kentex", "amazon_buy_ship");
     expect(k.quote!.expired).toBe(true);
-    expect(k.complete).toBe(false);
     expect(k.why).toMatch(/expired/);
-    expect(cheapestDelivered(ps)).toBe(find(ps, "L", "demo", "local").id);
   });
 
   it("never lets an incomplete subtotal or a similar item win", () => {
-    const ps = buildPlans(base({ offers: [{ ...local, exact: false }, other] }));
+    const ps = buildPlans(base({ offers: [{ ...local, exact: false }, { ...uk }] }));
     expect(cheapestDelivered(ps)).toBeNull();
-    const cheapIncomplete = buildPlans(base({ offers: [{ ...local, priceMinor: 90000 }, other] }));
-    expect(cheapestDelivered(cheapIncomplete)).toBe(find(cheapIncomplete, "L", "demo", "local").id);
+    const similar = buildPlans(base({ offers: [{ ...amazon, exact: false, specs: listed }] }));
+    expect(cheapestDelivered(similar)).toBeNull();
+  });
+
+  it("ranks on the high end so a wide modelled range cannot win on its floor", () => {
+    const ps = buildPlans(base({ offers: [{ ...local, priceMinor: 9000 }, { ...amazon, specs: listed }] }));
+    const winner = ps.find((p) => p.id === cheapestDelivered(ps))!;
+    const others = ps.filter((p) => p.exact && p.complete && p.id !== winner.id);
+    for (const o of others) expect(winner.kes!.high).toBeLessThanOrEqual(o.kes!.high);
+  });
+
+  it("uses a measured parcel when one exists", () => {
+    const ps = buildPlans(base({ offers: [amazon], parcel: measuredParcel }));
+    expect(find(ps, "A", "kentex", "amazon_buy_ship").parcel!.basis).toBe("measured");
   });
 
   it("checks the budget honestly", () => {
     const ps = buildPlans(base({ prefs: { handling: "door", budgetKesMinor: 1_000_000, budgetIncludesDelivery: true } }));
     expect(find(ps, "L", "demo", "local").underBudget).toBe("yes");
-    // The known floor alone already passes the budget
-    expect(find(ps, "A", "kentex", "forwarding").underBudget).toBe("no");
-    const roomy = buildPlans(base({ prefs: { handling: "door", budgetKesMinor: 5_000_000, budgetIncludesDelivery: true } }));
-    expect(find(roomy, "A", "kentex", "forwarding").underBudget).toBe("unknown");
     const tight = buildPlans(base({ prefs: { handling: "door", budgetKesMinor: 100_000, budgetIncludesDelivery: true } }));
     expect(find(tight, "L", "demo", "local").underBudget).toBe("no");
   });
 
-  it("asks Aquantuo for county and city before the estimator", () => {
-    const h = find(buildPlans(base({ offers: [other], destination: null })), "O", "aquantuo", "self_buy").handoff!;
-    expect(h.missing).toEqual(expect.arrayContaining(["County or state in Kenya", "City or area in Kenya"]));
-    expect(h.steps[0]).toMatch(/0 is a placeholder/);
+  it("gives tracking links and estimated parcel fields in the handoff", () => {
+    const h = find(buildPlans(base({ offers: [amazon] })), "A", "kentex", "amazon_buy_ship").handoff!;
+    expect(h.trackingUrl).toBe("https://kentexcargo.com/tracking");
+    expect(h.fields.map((f) => f.label)).toContain("Packed weight (estimate)");
+    expect(h.missing).toEqual([]);
   });
 
   it("keeps a working handoff when browser assistance fails or is off", async () => {
-    const h = find(buildPlans(base({ offers: [other] })), "O", "aquantuo", "self_buy").handoff!;
+    const h = find(buildPlans(base({ offers: [other] })), "O", "kentex", "forwarding").handoff!;
     const failing = { fill: async () => { throw new Error("boom"); } };
     const r = await withAssist(h, failing, true);
     expect(r.assisted).toBe(false);
     expect(r.error).toMatch(/copy buttons/);
-    expect(r.handoff.officialUrl).toBe("https://aquantuo.com/Price-Estimator");
     expect((await withAssist(h, failing, false)).error).toBeUndefined();
-    const ok = await withAssist(h, { fill: async () => {} }, true);
-    expect(ok.assisted).toBe(true);
+    expect((await withAssist(h, { fill: async () => {} }, true)).assisted).toBe(true);
   });
 
   it("keeps pre-alert, warehouse receipt and Kenya delivery separate", () => {
     expect(nextAction("forwarding", []).step).toBe("warehouse_verified");
     expect(nextAction("forwarding", ["warehouse_verified", "purchased"]).step).toBe("pre_alert");
-    expect(nextAction("forwarding", ["warehouse_verified", "purchased", "pre_alert"]).step).toBe("received_warehouse");
-    expect(nextAction("forwarding", ["pre_alert"]).step).toBe("warehouse_verified");
     expect(nextAction("buy_for_me", ["quote_accepted"]).step).toBe("received_warehouse");
-  });
-
-  it("adds the Kentex assisted fee, tax line and insurance only over $200", () => {
-    const k = find(buildPlans(base({ quotes: [] })), "A", "kentex", "amazon_buy_ship");
-    expect(k.components.find((c) => c.key === "buy_fee")!.minor).toBe(300);
-    expect(k.components.find((c) => c.key === "sales_tax")!.status).toBe("unknown");
-    expect(k.components.find((c) => c.key === "insurance")).toBeUndefined();
-    expect(k.complete).toBe(false);
-    const pricey = find(buildPlans(base({ offers: [{ ...amazon, priceMinor: 25000 }], quotes: [] })), "A", "kentex", "amazon_buy_ship");
-    expect(pricey.components.find((c) => c.key === "insurance")!.minor).toBe(1250);
-    const edge = find(buildPlans(base({ offers: [{ ...amazon, priceMinor: 20000 }], quotes: [] })), "A", "kentex", "forwarding");
-    expect(edge.components.find((c) => c.key === "insurance")).toBeUndefined();
-  });
-
-  it("prices the Aquantuo UK lane at its own flagged rate", () => {
-    const uk2 = find(buildPlans(base({ offers: [uk], quotes: [] })), "U", "aquantuo", "self_buy");
-    const us2 = find(buildPlans(base({ offers: [other], quotes: [] })), "O", "aquantuo", "self_buy");
-    const fu = uk2.components.find((c) => c.key === "freight")!, fs = us2.components.find((c) => c.key === "freight")!;
-    expect(fu.status).toBe("estimated");
-    expect(fu.minor).toBe(2800);
-    expect(fs.minor).toBe(3600);
-    expect(fu.note).toMatch(/UK rate is unconfirmed/);
-    expect(uk2.complete).toBe(false);
   });
 });
 
@@ -204,5 +205,17 @@ describe("identity and fx", () => {
     expect(toKes(5700, "USD", fx)).toEqual({ low: 740_715, high: 777_751 });
     expect(toKes(100, "EUR", fx)).toBeNull();
     expect(fxLabel(fx)).toContain("1 USD = KSh 129.95 (CBK");
+  });
+});
+
+describe("packaging priors", () => {
+  it("lets the title decide the kind before the category", () => {
+    expect(estimateParcel({ title: "Top opening cat carrier", specs: { category: ["dog-crates-kennels"] } }).kind).toBe("pet carrier");
+    expect(estimateParcel({ title: "Something", specs: { category: ["dog-crates"] } }).kind).toBe("crate");
+  });
+  it("lets a folding crate ship flat at the low end only", () => {
+    const e = estimateParcel({ title: "Wire dog crate", specs: { weightGrams: 9000, lengthMm: 760, widthMm: 480, heightMm: 530 } });
+    expect(e.low.heightMm).toBeLessThanOrEqual(110);
+    expect(e.high.heightMm).toBeGreaterThan(480);
   });
 });

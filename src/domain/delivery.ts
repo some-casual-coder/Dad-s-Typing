@@ -20,7 +20,7 @@ export interface DeliveryInput {
 }
 
 const PROVIDER_MODES: Record<string, string[]> = {
-  aquantuo: ["self_buy", "buy_for_me"], kentex: ["amazon_buy_ship", "forwarding"], store: ["direct"],
+  aquantuo: ["self_buy", "buy_for_me"], kentex: ["amazon_buy_ship", "buy_for_me", "forwarding"], store: ["direct"],
 };
 
 const posInt = (v: unknown, max: number, name: string) => {

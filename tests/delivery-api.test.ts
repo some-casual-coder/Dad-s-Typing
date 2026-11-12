@@ -102,7 +102,8 @@ describe("delivery api", () => {
     await call(postQuote, "POST", s.mum, s.id, q(s.ext, { expiresAt: "2020-01-01T00:00:00Z" }));
     const k = (await call(getDelivery, "GET", s.mum, s.id)).json.plans.find((p: { mode: string; offerId: string }) => p.mode === "amazon_buy_ship" && p.offerId === s.ext);
     expect(k.quote.expired).toBe(true);
-    expect(k.complete).toBe(false);
+    // Falls back to our modelled estimate, not the stale quote amount
+    expect(k.components.find((c: { key: string }) => c.key === "freight").label).toBe("Air freight to Kenya");
   });
 
   it("records user-entered steps once and in the right service", async () => {
