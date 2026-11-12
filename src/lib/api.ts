@@ -1,3 +1,4 @@
+import type { Cards } from "@/delivery/present";
 import type { Plan } from "@/delivery/types";
 import { newId, tokenKey, type NextAction, type OfferStatus, type Role } from "./format";
 
@@ -44,7 +45,7 @@ export interface DeliveryInputs {
   weightGrams: number | null; lengthMm: number | null; widthMm: number | null; heightMm: number | null; hub: "texas" | "delaware" | null;
 }
 export interface DeliveryView {
-  input: DeliveryInputs; plans: Plan[]; cheapestId: string | null; asOf: string; fxSource: string;
+  input: DeliveryInputs; plans: Plan[]; cheapestId: string | null; cards: Cards; asOf: string; fxSource: string;
   destination: { county: string; area: string; source: string; confirmed: boolean } | null; askDestination: boolean;
   progress: { planId: string; done: string[]; next: { step: string | null; text: string } }[];
 }

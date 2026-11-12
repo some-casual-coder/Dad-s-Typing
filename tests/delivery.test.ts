@@ -7,6 +7,7 @@ import { nextAction } from "@/delivery/steps";
 import { addWorkingDays, estimateArrival, formatRange, kentexDeparture, nairobiDate } from "@/delivery/eta";
 import { FALLBACK_FX, fxLabel, toKes } from "@/delivery/fx";
 import { closestMatch, identity } from "@/delivery/identity";
+import { difference, present, priceText } from "@/delivery/present";
 import type { ImportedQuote, OfferInput, Plan } from "@/delivery/types";
 
 const NOW = new Date("2026-11-12T10:00:00Z");
@@ -272,5 +273,59 @@ describe("arrival dates", () => {
     const ps = buildPlans(base({ offers: [amazon, uk] }));
     expect(ps.filter((p) => p.primary).every((p) => p.eta)).toBe(true);
     expect(find(ps, "A", "store", "direct").eta).toBeNull();
+  });
+});
+
+describe("cards", () => {
+  const listed = { weightGrams: 1200, lengthMm: 450, widthMm: 300, heightMm: 280, brand: "Sherpa", imageUrl: "https://img.test/a.jpg" };
+  const a = { ...amazon, id: "A", specs: listed };
+  const b = { ...amazon, id: "B", priceMinor: 9000, specs: { ...listed, brand: "Petmate", lengthMm: 540 } };
+
+  it("shows one card per listing with its chosen method, a price and a date", () => {
+    const ps = buildPlans(base({ offers: [a, b, { ...uk, exact: false }] }));
+    const c = present(ps, cheapestDelivered(ps));
+    expect(c.closest.map((x) => x.offerId)).toEqual(["A", "B"]);
+    expect(c.closest[0].winner).toBe(true);
+    expect(c.closest[0].method).toBe("We buy it on Amazon and ship it");
+    expect(c.closest[0].price).toMatch(/^KSh [\d,]+( to [\d,]+)?$|^about KSh/);
+    expect(c.closest[0].arrival).toMatch(/^about \d+/);
+    expect(c.closest[0].others.length).toBeGreaterThan(0);
+    expect(c.similar.map((x) => x.offerId)).toEqual(["U"]);
+    expect(c.similar[0].price).toBeNull();
+  });
+
+  it("computes the difference line from facts, never from the model", () => {
+    const ps = buildPlans(base({ offers: [a, b] }));
+    const c = present(ps, cheapestDelivered(ps));
+    expect(c.closest[0].difference).toBe("Closest to what you sent.");
+    expect(c.closest[1].difference).toMatch(/^Different brand, 9 cm bigger, KSh [\d,]+ dearer\.$/);
+  });
+
+  it("recommends with a reason only when the first card has a full price", () => {
+    const ps = buildPlans(base({ offers: [a, b] }));
+    expect(present(ps, cheapestDelivered(ps)).recommendation).toMatch(/^I'd get the first one: closest match, arrives about .*, KSh [\d,]+ cheaper than the next one\.$/);
+    const inc = buildPlans(base({ offers: [uk] }));
+    expect(present(inc, cheapestDelivered(inc)).recommendation).toMatch(/None of these has a full delivered price yet/);
+  });
+
+  it("shows one figure when the range is narrow and a range when it matters", () => {
+    expect(priceText({ low: 1_000_000, high: 1_050_000 })).toBe("about KSh 10,500");
+    expect(priceText({ low: 1_000_000, high: 2_000_000 })).toBe("KSh 10,000 to 20,000");
+  });
+
+  it("caps each group at three and puts the rest behind more", () => {
+    const many = Array.from({ length: 5 }, (_, i) => ({ ...a, id: `M${i}`, priceMinor: 3000 + i * 100 }));
+    const c = present(buildPlans(base({ offers: many })), null);
+    expect(c.closest).toHaveLength(3);
+    expect(c.more).toHaveLength(2);
+  });
+});
+
+describe("card wording with overlapping ranges", () => {
+  it("does not call an overlapping range cheaper", () => {
+    const mk = (id: string, low: number, high: number) => ({ id, exact: true, complete: true, kes: { low, high }, eta: null,
+      item: { title: id, seller: "s", imageUrl: null, brand: null, priceMinor: 1, currency: "USD", longestMm: null } }) as unknown as Plan;
+    expect(difference(mk("B", 1_350_000, 6_580_000), mk("A", 3_020_000, 4_160_000))).toBe("Up to KSh 24,200 more.");
+    expect(difference(mk("B", 5_000_000, 6_000_000), mk("A", 3_000_000, 4_000_000))).toBe("KSh 20,000 dearer.");
   });
 });

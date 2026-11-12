@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { buildPlans, cheapestDelivered } from "@/delivery/compare";
 import { fxLabel } from "@/delivery/fx";
 import { closestMatch, identity } from "@/delivery/identity";
+import { present } from "@/delivery/present";
 import { RULES_AS_OF } from "@/delivery/rules";
 import { isStep, nextAction, stepsFor } from "@/delivery/steps";
 import type { Destination, ImportedQuote, Mode, OfferInput, Parcel, Prefs, Provider } from "@/delivery/types";
@@ -148,7 +149,8 @@ export async function getDelivery(taskId: string, token: string, now = new Date(
       return d.length ? [{ planId: p.id, done: d, next: nextAction(p.mode, d) }] : [];
     });
     const where = row?.county ? { county: row.county as string, area: (row.city as string) ?? "", source: row.source as string, confirmed: row.confirmed as boolean } : null;
-    return { input, plans, cheapestId: cheapestDelivered(plans), progress, asOf: RULES_AS_OF, fx, fxSource: fxLabel(fx),
+    const cheapestId = cheapestDelivered(plans);
+    return { input, plans, cheapestId, cards: present(plans, cheapestId), progress, asOf: RULES_AS_OF, fx, fxSource: fxLabel(fx),
       destination: where, askDestination: !where?.confirmed };
   });
 }

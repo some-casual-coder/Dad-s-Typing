@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Chat from "./Chat";
 import Comparison from "./Comparison";
-import Delivery from "./Delivery";
+import DeliveredCards from "./DeliveredCards";
 import PayerPanel from "./PayerPanel";
 import ShareInvite from "./ShareInvite";
 import {
@@ -181,19 +181,19 @@ export default function TaskPage({ taskId }: { taskId: string }) {
           {choiceErr.stale && <button className="btn" onClick={() => { setChoiceErr(null); void load(); }}>Refresh</button>}
         </div>
       )}
-      <Comparison offers={cmp?.offers ?? []} canChoose={chooseOn} busyId={choosing}
-        disabled={!cmp} onChoose={choose} />
-      {cmp && cmp.offers.length > 0 && !view.order && (
-        <Delivery taskId={taskId} token={token} canEdit={canDo(roles, "message")} refreshKey={cmp.version} />
+      {cmp && !view.order ? (
+        <DeliveredCards taskId={taskId} token={token} refreshKey={cmp.version * 1000 + cmp.offers.length} canEdit={canDo(roles, "message")} canChoose={chooseOn}
+          busy={choosing} excluded={cmp.offers.filter((o) => o.status === "ineligible")}
+          onChoose={(id) => { const o = cmp.offers.find((x) => x.id === id); if (o) void choose(o); }} />
+      ) : (
+        <Comparison offers={cmp?.offers ?? []} canChoose={false} busyId={choosing} disabled onChoose={choose} />
       )}
 
       {canDo(roles, "invite") && (
         <section className="card stack" aria-labelledby="ask-h">
           <h2 id="ask-h">Ask someone</h2>
-          {!canDo(roles, "choose") && (
-            <ShareInvite taskId={taskId} token={token} roles={["requester", "chooser"]} label="Mum"
-              buttonText="Send to Mum" hint="Mum can ask questions, correct details and choose herself." />
-          )}
+          <ShareInvite taskId={taskId} token={token} roles={["requester", "chooser"]} label="Mum"
+            buttonText="Send to Mum" hint="Mum can ask questions, correct details and choose herself." />
           <ShareInvite taskId={taskId} token={token} roles={["helper"]} label="Helper"
             buttonText="Make a helper link" hint="A helper can chat and suggest details, but cannot choose or pay." />
           <ShareInvite taskId={taskId} token={token} roles={["payer"]} label="Payer"

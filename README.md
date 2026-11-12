@@ -52,7 +52,7 @@ The server refuses to start PayPal unless `PAYPAL_ENV=sandbox`.
 1. Open `/`. Choose **Upload photo** and pick a photo of a cat carrier. No photo handy? Use
    **Download a sample photo** on the same screen (a synthetic drawing). Optionally add a note such
    as "For Mum. It must open from the top and be at least 45 cm long", then **Start with this photo**.
-   You can also type a request and choose **Start for Mum**, or speak it with **Speak**.
+   You can also type a request and choose **Start for me** (or **Start for Mum** to send her a link to choose), or speak it with **Speak**.
 2. The assistant reads the photo and note and proposes requirements, each with the words it relied on.
    Nothing is applied until a person confirms it.
 3. Choose **Send to Mum** and open the link in a **different browser profile** (a private window shares

@@ -97,6 +97,8 @@ export interface Plan {
   title: string;
   exact: boolean;
   match: Identity | null;
+  // The listing itself, for the card
+  item: { title: string; seller: string; imageUrl: string | null; brand: string | null; priceMinor: number; currency: string; longestMm: number | null };
   availability: Availability;
   why: string;
   components: Component[];

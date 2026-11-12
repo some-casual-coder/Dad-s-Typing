@@ -7,6 +7,9 @@ import PhotoPicker from "@/components/PhotoPicker";
 import { api, storeToken } from "@/lib/api";
 import { newId, type Role } from "@/lib/format";
 
+// Solo is the default: one person can find, choose, pay and track
+const SOLO: Role[] = ["requester", "chooser", "helper", "payer"];
+
 export default function Home() {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -26,7 +29,7 @@ export default function Home() {
     setBusy(true); setErr("");
     try {
       if (!task.current) {
-        const r = await api.createTask({ title: title.trim() || note.trim().slice(0, 80) || "Photo request", starterRoles: ["helper", "payer"], seedExternal: false });
+        const r = await api.createTask({ title: title.trim() || note.trim().slice(0, 80) || "Photo request", starterRoles: SOLO, seedExternal: false });
         storeToken(r.taskId, r.token);
         task.current = r;
       }
@@ -63,11 +66,11 @@ export default function Home() {
     <main className="page">
       <header className="hero">
         <p className="eyebrow">Dad&apos;s Typing...</p>
-        <h1>Help Mum buy the right thing, together.</h1>
+        <h1>Send a photo. Pick one. Pay once. Get a date.</h1>
         <p className="lead">
-          Describe what is needed or share a photo. We find options that really match, Mum
-          chooses herself, and whoever is paying approves it in PayPal. Everyone sees the same
-          thing along the way.
+          Share a photo or say what you want. We find it and close alternatives, delivered to
+          Kenya, with a price in shillings and an arrival date. Shopping for someone? Send them
+          a link to choose, or to pay.
         </p>
       </header>
 
@@ -80,11 +83,11 @@ export default function Home() {
               <input name="title" value={title} onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. a cat carrier that opens from the top" maxLength={120} />
             </label>
-            <button className="btn" disabled={busy} onClick={() => start(["helper", "payer"], true)}>
-              Start for Mum
+            <button className="btn" disabled={busy} onClick={() => start(SOLO, false)}>
+              Start for me
             </button>
-            <button className="btn secondary" disabled={busy} onClick={() => start(["requester", "chooser"], false)}>
-              Start as Mum
+            <button className="btn secondary" disabled={busy} onClick={() => start(["helper", "payer"], true)}>
+              Start for Mum
             </button>
             <div className="stack photo-start" role="group" aria-label="Start from a photo">
               <PhotoPicker file={photo} alt={alt} disabled={busy} label="Upload photo"
@@ -107,8 +110,8 @@ export default function Home() {
               )}
             </div>
             <p className="muted">
-              &quot;Start for Mum&quot; sets you up to help and pay. Then you send her a link.
-              &quot;Start as Mum&quot; is for Mum herself.
+              &quot;Start for me&quot; lets you find, choose and pay yourself. &quot;Start for Mum&quot; sets
+              you up to pay, then sends her a link to choose.
             </p>
           </>
         )}

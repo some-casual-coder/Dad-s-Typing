@@ -97,3 +97,18 @@ details { min-width: 0; }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .small { font-size: .9rem; }
+
+/* Delivered-to-Kenya cards */
+.dcards { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.dcard { border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 6px; min-width: 0; }
+.dcard.winner { border: 2px solid var(--ok); }
+.dcard .badge { justify-self: start; margin: 0; }
+.dcard-top { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.dcard-top img, .dcard .noimg { width: 72px; height: 72px; flex: none; border-radius: 10px; object-fit: cover; background: var(--accent-2); }
+.dcard-main { min-width: 0; }
+.dcard h4 { margin: 0; font-size: 1rem; line-height: 1.3; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dcard p { margin: 0; }
+.dcard .btn { justify-self: stretch; }
+.more summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 700; }
+.parts { margin: 0; padding-left: 18px; display: grid; gap: 4px; overflow-wrap: anywhere; }

@@ -132,6 +132,13 @@ function underBudget(parts: Component[], kes: Plan["kes"], complete: boolean, pr
   return all && k.high <= budget ? "yes" : "unknown";
 }
 
+const itemOf = (o: OfferInput): Plan["item"] => {
+  const s = o.specs ?? {};
+  const dims = [s.lengthMm, s.widthMm, s.heightMm].filter((x): x is number => !!x);
+  return { title: o.title, seller: o.seller, imageUrl: s.imageUrl ?? null, brand: s.brand ?? null, priceMinor: o.priceMinor, currency: o.currency,
+    longestMm: dims.length === 3 ? Math.max(...dims) : null };
+};
+
 function laneOf(d: Draft): Lane | null {
   if (d.route === "local") return "local_demo";
   if (d.provider === "kentex") return d.mode === "amazon_buy_ship" ? "kentex_amazon" : "kentex_store";
@@ -158,7 +165,7 @@ export function buildPlans(i: Inputs): Plan[] {
     return {
       id: `${d.offer.id}:${provider}:${d.mode}`, offerId: d.offer.id, route: d.route, provider, mode: d.mode,
       title: TITLES[d.mode as string] ?? `Buy at ${d.offer.seller}`,
-      exact: d.offer.exact, match: d.offer.match ?? null, availability: d.availability,
+      exact: d.offer.exact, match: d.offer.match ?? null, availability: d.availability, item: itemOf(d.offer),
       why: usable ? `Uses your ${provider} quote.` : q && expired ? "Your saved quote has expired. Get a fresh one." : d.why,
       components: parts, complete, primary: d.primary, confidence: overallConfidence(parts), parcel: d.parcel,
       eta: laneOf(d) ? estimateArrival(laneOf(d)!, i.now, { area: areaOf(i.destination), handling: i.prefs.handling }) : null,
