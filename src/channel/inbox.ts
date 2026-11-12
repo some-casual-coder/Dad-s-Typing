@@ -15,7 +15,8 @@ import type { Attribute, Requirement } from "@/domain/eligibility";
 import { pendingProposals } from "@/domain/messages";
 import { getTaskView } from "@/domain/view";
 import { findLinks, LABEL, withoutSocialLinks } from "@/sources/recognize";
-import { address, contentHash, deriveChannelToken, senderHash } from "./bridge";
+import { chooseCandidate } from "@/sources/intake";
+import { address, contentHash, deriveChannelToken, openRecipient, senderHash } from "./bridge";
 import { admitted, handleJoinOrStop, handleStart, optedOut, optOut } from "./join";
 import { menuCards, renderChosen, renderOptions } from "./render";
 import { allowedSenders, channelIds, getChannel, isConfigured, type ChannelDef } from "./registry";
@@ -162,11 +163,13 @@ async function claimInbox(channel: string): Promise<Row | null> {
       [MAX_ATTEMPTS, channel, SORRY],
     );
     await c.query(`UPDATE channel_inbox SET state='failed', image_b64=NULL, sender='', body='', place_county=NULL, place_area=NULL, contact_name=NULL WHERE channel=$2 AND state='processing' AND locked_until < now() AND attempts >= $1`, [MAX_ATTEMPTS, channel]);
+    // A photo waits a moment so the rest of a burst of screenshots arrives too
     const r = await c.query(
       `UPDATE channel_inbox SET state='processing', attempts=attempts+1, locked_until=now()+interval '3 minutes'
         WHERE id = (SELECT id FROM channel_inbox WHERE channel=$1 AND (state='received' OR (state='processing' AND locked_until < now()))
+                      AND (image_b64 IS NULL OR created_at <= now() - make_interval(secs => $2::float8 / 1000))
                     ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`,
-      [channel],
+      [channel, BURST_MS()],
     );
     return (r.rows[0] as Row | undefined) ?? null;
   });
@@ -237,6 +240,17 @@ async function resolveTask(channel: string, row: Row) {
   });
   await seedDemoOffers(made.taskId).catch(() => console.error("channel_error", "seed_demo"));
   return { taskId: made.taskId, token: made.token, fresh: true, dest };
+}
+
+export const BURST_MS = () => Number(process.env.CHANNEL_BURST_MS ?? 4000);
+
+// Photos sent in a burst are all read, but only the last one is answered
+async function moreComing(channel: string, row: Row): Promise<boolean> {
+  if (!row.image_b64) return false;
+  return !!(await tx((c) => c.query(
+    `SELECT 1 FROM channel_inbox WHERE channel=$1 AND sender=$2 AND id<>$3 AND state='received' AND image_b64 IS NOT NULL
+       AND created_at >= $4 AND created_at <= $4::timestamptz + make_interval(secs => $5::float8 / 1000 * 2)`,
+    [channel, row.sender, row.id, row.created_at, BURST_MS()]))).rowCount;
 }
 
 // Several bodies go out as separate messages, each a few seconds after the last
@@ -388,6 +402,45 @@ async function handleRestart(channel: string, row: Row): Promise<string | null> 
   return task ? ended(link(task.taskId, task.token)) : "There's no open search right now. Send a photo or a few words to start one.";
 }
 
+// A video check that ends sends one message to whoever is chatting about that
+// task: the likeliest item with options, or a plain "send screenshots"
+export async function videoFollowUp(attemptId: string) {
+  const a = (await tx((c) => c.query(
+    `SELECT a.state, a.source_id, s.task_id, s.platform FROM source_attempts a JOIN shared_sources s ON s.id=a.source_id WHERE a.id=$1`, [attemptId]))).rows[0];
+  if (!a) return;
+  // Only while it is still their current search (after NEW it would be noise),
+  // and only to someone still subscribed: after STOP they get no pushes
+  const who = (await tx((c) => c.query(
+    `SELECT i.channel, i.sender_hash, i.grant_id, s.recipient_enc FROM channel_identities i
+       JOIN channel_subscriptions s ON s.task_id=i.task_id AND s.channel=i.channel AND s.sender_hash=i.sender_hash
+      WHERE i.task_id=$1 LIMIT 1`, [a.task_id]))).rows[0];
+  const to = who ? openRecipient(who.channel, who.recipient_enc) : null;
+  if (!who || !to) return;
+  const token = deriveChannelToken(who.channel, who.grant_id);
+  const cands = (await tx((c) => c.query(
+    `SELECT id, label, status FROM product_candidates WHERE source_id=$1 ORDER BY created_at`, [a.source_id]))).rows;
+  const proposed = cands.filter((k) => k.status === "proposed");
+  // They added screenshots or chose meanwhile: their evidence leads, stay quiet
+  if (a.state === "completed" && !proposed.length && cands.length) return;
+  const name = LABEL[a.platform as keyof typeof LABEL] ?? "video";
+  let body: string;
+  if (a.state !== "completed" || !proposed.length) {
+    body = `I checked the ${name} video but couldn't make out the product clearly. Send me screenshots of it here (one or more is fine), or tell me what it is.`;
+  } else {
+    await chooseCandidate(a.task_id, token, proposed[0].id);
+    const others = proposed.slice(1, 4).map((k) => k.label as string);
+    const options = await optionsBlock(who.channel, who.sender_hash, a.task_id, token);
+    body = [
+      `From the ${name} video, I think it's *${proposed[0].label}*.${others.length ? ` I also spotted: ${others.join(", ")}. Send the name if you meant one of those.` : ""}`,
+      options || "I'm still finding where to buy it. Screenshots of the product help me narrow it down.",
+      `Your task: ${link(a.task_id, token)}`,
+    ].join("\n\n");
+  }
+  await tx((c) => c.query(
+    `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (dedupe_key) DO NOTHING`,
+    [randomUUID(), who.channel, to, body, `video:${attemptId}`]));
+}
+
 const UNOPENED = "I couldn't open that photo or attachment here, so I haven't used it. Send a screenshot or tell me what you're looking for.";
 
 // After an order is paid or cancelled, a bare message may be about that order:
@@ -451,7 +504,7 @@ async function processRow(channel: string, row: Row) {
   const options = await optionsBlock(channel, senderHash(channel, row.sender as string), taskId, token);
   const body = composeReply({ reply, extra: [row.attachment_error ? UNOPENED : "", options, where], proposals: ex.proposals as never, link: link(taskId, token), fresh,
     maxChars: getChannel(channel).maxReplyChars });
-  await finish(channel, row, body);
+  await finish(channel, row, (await moreComing(channel, row)) ? [] : body);
 }
 
 // Handles queued messages for one channel, or every configured one; safe to call concurrently

@@ -600,7 +600,7 @@ describe("shared links through the WhatsApp simulator (R01, R03, R06)", () => {
     await send({ text: REEL });
     const out = await outbox();
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatch(/I've added the Instagram link\. I can't read the video from a link: open your task and add a screenshot/);
+    expect(out[0]).toMatch(/Got the Instagram link, but I can't see inside the video from a link\. Send me screenshots of the product here/);
     expect(out[0]).toMatch(/Your task is ready: https:\/\/app\.test\/t\/[0-9a-f-]+#k=/);
     expect(out[0]).not.toMatch(/instagram\.com/);
     expect(interpret).not.toHaveBeenCalled();
@@ -674,5 +674,66 @@ describe("search refinement", () => {
     expect(sharper("lenovo laptop charger", "Lenovo charger")).toBe(false);
     expect(sharper("lenovo laptop charger", "laptop charger Lenovo")).toBe(false);
     expect(sharper(null, "anything")).toBe(false);
+  });
+});
+
+describe("a burst of screenshots", () => {
+  afterEach(() => { process.env.CHANNEL_BURST_MS = "0"; });
+
+  it("reads every photo but answers once, after the last", async () => {
+    await signed(inbound, IN, msg({ image: IMG }));
+    await signed(inbound, IN, msg({ image: IMG }));
+    await signed(inbound, IN, msg({ image: IMG }));
+    // Arrived a second apart, a little while ago
+    await pool.query(`UPDATE channel_inbox SET created_at = now() - interval '20 seconds' + (interval '1 second' * sub.n)
+      FROM (SELECT id, row_number() OVER (ORDER BY created_at) AS n FROM channel_inbox) sub WHERE sub.id = channel_inbox.id`);
+    process.env.CHANNEL_BURST_MS = "4000";
+    await processInboxOnce("whatsapp");
+    expect(await count("SELECT count(*)::int n FROM channel_inbox WHERE state='done'")).toBe(3);
+    expect(await count("SELECT count(*)::int n FROM channel_outbox")).toBe(1);
+    expect(interpret).toHaveBeenCalledTimes(3);
+  });
+
+  it("holds a fresh photo back until the burst window passes", async () => {
+    process.env.CHANNEL_BURST_MS = "60000";
+    await signed(inbound, IN, msg({ image: IMG }));
+    await processInboxOnce("whatsapp");
+    expect(await count("SELECT count(*)::int n FROM channel_inbox WHERE state='received'")).toBe(1);
+  });
+});
+
+describe("video check follow-up on WhatsApp", () => {
+  const REEL = "https://www.instagram.com/reel/C9abcDEF123/";
+  async function linkTask() {
+    await pool.query(`DELETE FROM channel_opt_outs`);
+    await signed(inbound, IN, msg({ text: REEL }));
+    await processInboxOnce("whatsapp");
+    const s = (await pool.query(`SELECT id, task_id FROM shared_sources ORDER BY created_at DESC LIMIT 1`)).rows[0];
+    const attempt = (await pool.query(
+      `INSERT INTO source_attempts (id,source_id,adapter,adapter_version,input_version,state,provider_job_id,deadline,next_poll_at)
+       VALUES (gen_random_uuid(),$1,'supadata_extract','test',(SELECT evidence_version FROM tasks WHERE id=$2),'queued','job-1',now()+interval '5 minutes',now())
+       RETURNING id`, [s.id, s.task_id])).rows[0].id as string;
+    return { taskId: s.task_id as string, attempt };
+  }
+  const last = async () => (await pool.query(`SELECT body FROM channel_outbox ORDER BY created_at DESC LIMIT 1`)).rows[0].body as string;
+
+  it("names the likeliest item when the check finds one", async () => {
+    const { pollDue } = await import("@/sources/intake");
+    const { validateExtract } = await import("@/sources/candidates");
+    const { taskId } = await linkTask();
+    const poll = vi.fn(async () => ({ kind: "completed" as const, out: validateExtract({ products: [
+      { label: "laptop charger", brand: "Lenovo", model: null, attributes: [], evidence: "visual", observation: "A charger is shown", timestamp_seconds: 4, uncertain: [] },
+      { label: "laptop sleeve", brand: null, model: null, attributes: [], evidence: "visual", observation: "A sleeve", timestamp_seconds: 9, uncertain: [] },
+    ], no_product_reason: null }) }));
+    await pollDue({ submit: vi.fn(), poll }, taskId);
+    expect(await last()).toMatch(/^From the Instagram video, I think it's \*laptop charger\*\. I also spotted: laptop sleeve\./);
+    expect(await count(`SELECT count(*)::int n FROM product_candidates WHERE status='chosen'`)).toBe(1);
+  });
+
+  it("says plainly to send screenshots when the check finds nothing", async () => {
+    const { pollDue } = await import("@/sources/intake");
+    const { taskId } = await linkTask();
+    await pollDue({ submit: vi.fn(), poll: vi.fn(async () => ({ kind: "failed" as const, reason: "provider_failed" })) }, taskId);
+    expect(await last()).toMatch(/^I checked the Instagram video but couldn't make out the product clearly\. Send me screenshots of it here/);
   });
 });

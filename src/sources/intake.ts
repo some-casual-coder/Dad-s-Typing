@@ -18,14 +18,15 @@ const MAX_SUBMIT_TRIES = 2;
 const CREDITS_PER_JOB = 5;
 
 // Supadata runs only when switched on, keyed, allowed for this platform and
-// this exact post, and under the credit ceiling. Default: off.
+// this exact post (or any public post with SUPADATA_ALLOW_ANY_POST=1, an
+// accepted rights risk), and under the credit ceiling. Default: off.
 export async function supadataGate(ref: { platform: string; identity: string }, env: Record<string, string | undefined> = process.env): Promise<{ on: boolean; why: string }> {
   if (env.SUPADATA_ENABLED !== "1") return { on: false, why: "disabled" };
   if (!env.SUPADATA_API_KEY) return { on: false, why: "no_credential" };
   const platforms = (env.SUPADATA_PLATFORMS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!platforms.includes(ref.platform)) return { on: false, why: "platform_not_approved" };
   const allow = (env.SUPADATA_URL_ALLOWLIST ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!allow.includes(ref.identity)) return { on: false, why: "link_not_approved" };
+  if (env.SUPADATA_ALLOW_ANY_POST !== "1" && !allow.includes(ref.identity)) return { on: false, why: "link_not_approved" };
   const ceiling = Number(env.SUPADATA_CREDIT_CEILING ?? "0");
   const used = Number((await pool.query(`SELECT COALESCE(sum(credits_estimate),0)::int n FROM source_attempts WHERE adapter='supadata_extract'`)).rows[0].n);
   if (!(ceiling > 0) || used + CREDITS_PER_JOB > ceiling) return { on: false, why: "budget" };
@@ -115,9 +116,10 @@ export async function submitPending(sourceId: string, ex: VideoExtractor = getVi
 
 // Poll due jobs; bounded by deadline. Safe to call from a request or a timer.
 export async function pollDue(ex: VideoExtractor = getVideoExtractor(), taskId?: string) {
-  await pool.query(
+  // Every attempt that ends here, however it ends, gets one chat follow-up
+  const ended: string[] = (await pool.query(
     `UPDATE source_attempts a SET state='timed_out', reason='deadline', updated_at=now() WHERE state IN ('queued','active') AND deadline < now()
-       AND ($1::uuid IS NULL OR source_id IN (SELECT id FROM shared_sources WHERE task_id=$1))`, [taskId ?? null]);
+       AND ($1::uuid IS NULL OR source_id IN (SELECT id FROM shared_sources WHERE task_id=$1)) RETURNING id`, [taskId ?? null])).rows.map((r) => r.id);
   await pool.query(`UPDATE shared_sources s SET status='needs_input', reason='timed_out', updated_at=now() WHERE status='checking'
       AND EXISTS (SELECT 1 FROM source_attempts a WHERE a.source_id=s.id AND a.state='timed_out')`);
   const due = (await pool.query(
@@ -129,12 +131,17 @@ export async function pollDue(ex: VideoExtractor = getVideoExtractor(), taskId?:
     if (p.kind === "pending" || p.kind === "retryable") {
       await pool.query(`UPDATE source_attempts SET state=$2, next_poll_at=now() + make_interval(secs => $3), updated_at=now() WHERE id=$1`,
         [a.id, p.kind === "pending" ? p.status : "queued", POLL_EVERY_MS / 1000]);
-    } else if (p.kind === "completed") await applyResult(a.id, p.out);
+    } else if (p.kind === "completed") { await applyResult(a.id, p.out); ended.push(a.id); }
     else {
       await pool.query(`UPDATE source_attempts SET state='failed', reason=$2, updated_at=now() WHERE id=$1`, [a.id, p.kind === "expired" ? "result_expired" : p.reason]);
       await setSource(pool, a.source_id, "needs_input", p.kind === "expired" ? "result_expired" : "provider_failed");
+      ended.push(a.id);
     }
   }
+  if (!ended.length) return;
+  // Loaded late: the chat engine itself imports this module
+  const { videoFollowUp } = await import("@/channel/inbox");
+  for (const id of ended) await videoFollowUp(id).catch((e) => console.error("source_error", "follow_up", (e as Error)?.name));
 }
 
 // Provider output becomes labelled observations and candidates. A late result

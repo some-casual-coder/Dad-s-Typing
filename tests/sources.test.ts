@@ -347,6 +347,11 @@ describe("R11 Supadata adapter against stubbed HTTP (no live calls)", () => {
     expect((await supadataGate(ref, { SUPADATA_ENABLED: "1", SUPADATA_API_KEY: "k", SUPADATA_PLATFORMS: "instagram" })).why).toBe("platform_not_approved");
     expect((await supadataGate(ref, { SUPADATA_ENABLED: "1", SUPADATA_API_KEY: "k", SUPADATA_PLATFORMS: "tiktok" })).why).toBe("link_not_approved");
     expect((await supadataGate(ref, { SUPADATA_ENABLED: "1", SUPADATA_API_KEY: "k", SUPADATA_PLATFORMS: "tiktok", SUPADATA_URL_ALLOWLIST: ref.identity })).why).toBe("budget");
+    // Any public post, by explicit choice; the platform list and the ceiling still apply
+    const open = { SUPADATA_ENABLED: "1", SUPADATA_API_KEY: "k", SUPADATA_ALLOW_ANY_POST: "1" };
+    expect((await supadataGate(ref, { ...open, SUPADATA_PLATFORMS: "instagram" })).why).toBe("platform_not_approved");
+    expect((await supadataGate(ref, { ...open, SUPADATA_PLATFORMS: "tiktok" })).why).toBe("budget");
+    expect((await supadataGate(ref, { ...open, SUPADATA_PLATFORMS: "tiktok", SUPADATA_CREDIT_CEILING: "100" })).on).toBe(true);
   });
 });
 

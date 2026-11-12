@@ -68,6 +68,12 @@ services:
       - { key: OPENROUTER_MODEL, sync: false }
       - { key: STT_MODEL, sync: false }
       - { key: CHANNEL3_API_KEY, sync: false }
+      - { key: SUPADATA_API_KEY, sync: false }         # reads shared videos; capped below
+      - { key: SUPADATA_ENABLED, value: "1" }
+      - { key: SUPADATA_PLATFORMS, value: "instagram,tiktok,facebook" }
+      - { key: SUPADATA_ALLOW_ANY_POST, value: "1" }
+      - { key: SUPADATA_CREDIT_CEILING, value: "100" }
+      - { key: SOURCE_RESOLVE_SHORT_LINKS, value: "1" }
       - { key: PAYPAL_CLIENT_ID, sync: false }
       - { key: PAYPAL_CLIENT_SECRET, sync: false }
       - { key: PAYPAL_MERCHANT_ID, sync: false }

@@ -80,7 +80,7 @@ describe("C02 Instagram DM: a shared Reel that can't be opened", () => {
   it("asks for a screenshot without claiming to have seen it; the screenshot updates the same task", async () => {
     await say("instagram", { text: "Find one like this https://www.instagram.com/reel/C9simPRIV01/" });
     const first = await last("instagram");
-    expect(first).toMatch(/can't read the video from a link/);
+    expect(first).toMatch(/can't see inside the video from a link/);
     expect(first.length).toBeLessThanOrEqual(900);
     const t = linkIn(first)!;
     expect(t).not.toBeNull();

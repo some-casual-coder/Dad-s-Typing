@@ -5,6 +5,7 @@ import { DomainError } from "@/domain/errors";
 import { getExchange, recordAssistantMessage } from "@/domain/messages";
 import { addMessage, getComparison } from "@/domain/tasks";
 import { claimExternalSearch } from "@/domain/offers";
+import { channelIds } from "@/channel/registry";
 import { intakeLinks, searchFor } from "@/sources/flow";
 import { submitPending } from "@/sources/intake";
 
@@ -49,7 +50,7 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   }
   // A shared social link is a reference, recorded once per task; the model
   // only ever sees the shopper's own words, never the post URL
-  const intake = await intakeLinks(taskId, input.key, input.text ?? "", !!input.image);
+  const intake = await intakeLinks(taskId, input.key, input.text ?? "", !!input.image, channelIds().includes(input.channel));
   const words = intake.words;
   const { requirements } = await getComparison(taskId, token);
   let result: Interpretation | null = null;
