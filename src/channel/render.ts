@@ -10,9 +10,8 @@ export function menuCards(c: Cards, max: number): Card[] {
   return [...c.closest, ...c.similar].slice(0, max);
 }
 
-export function renderOptions(cards: Card[], where: string | null, compact: boolean): string {
+export function renderOptions(cards: Card[], head: string, compact: boolean): string {
   if (!cards.length) return "";
-  const head = where ? `Delivered to ${where}:` : "Delivered to Kenya:";
   const lines = cards.map((c, i) => {
     const price = c.price ? c.price.replace(/^about /, "") : "delivery cost not confirmed";
     const date = c.arrival ? `, arrives ${shortDates(c.arrival)}` : "";

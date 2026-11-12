@@ -22,7 +22,9 @@ describe("places", () => {
   });
   it("treats yes as confirming the current guess", () => {
     const cur = { county: "Nairobi", area: "", handling: "door" as const, source: "country_code" as const, confirmed: false };
-    expect(answerFromText("Yes!", cur)).toEqual({ county: "Nairobi", area: "" });
+    expect(answerFromText("Yes!", cur)).toEqual({ county: "Nairobi", area: "", handling: "pickup" });
+    expect(answerFromText("Kisumu", cur)).toEqual({ county: "Kisumu", area: "Kisumu", handling: "door" });
+    expect(answerFromText("door please", cur)).toEqual({ county: "Nairobi", area: "", handling: "door" });
     expect(answerFromText("yes but it has to open from the top", cur)).toBeNull();
   });
 });

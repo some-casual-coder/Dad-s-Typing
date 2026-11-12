@@ -415,27 +415,27 @@ describe("destination from the sender", () => {
 
   it("asks once for a +254 sender, and a returning sender is asked nothing", async () => {
     await send({ image: IMG });
-    expect((await outbox()).at(-1)).toMatch(/Deliver to Nairobi\? Reply YES/);
+    expect((await outbox()).at(-1)).toMatch(/You collect it in Nairobi at no extra cost\. Reply YES/);
     await send({ text: "Westlands" });
-    expect((await outbox()).at(-1)).toMatch(/^Delivering to Westlands, Nairobi/);
+    expect((await outbox()).at(-1)).toMatch(/^Delivering to your door in Westlands, Nairobi/);
     expect(interpret).toHaveBeenCalledTimes(1);
     // A new photo starts a new task: the saved place is used, no question
     await send({ image: IMG });
     const last = (await outbox()).at(-1)!;
-    expect(last).not.toMatch(/Deliver to .*\?/);
-    expect(last).toMatch(/Delivering to Westlands, Nairobi, as last time/);
+    expect(last).not.toMatch(/Reply YES/);
+    expect(last).toMatch(/Delivering to your door in Westlands, Nairobi, as last time/);
   });
 
   it("a YES confirms the default", async () => {
     await send({ image: IMG });
     await send({ text: "yes" });
-    expect((await outbox()).at(-1)).toMatch(/^Delivering to Nairobi\./);
+    expect((await outbox()).at(-1)).toMatch(/^You'll collect it in Nairobi\./);
   });
 
   it("maps a location pin to county and area and keeps no coordinates", async () => {
     await send({ image: IMG });
     await send({ text: undefined, location: { lat: -1.2921, lon: 36.7856 } });
-    expect((await outbox()).at(-1)).toMatch(/deliver to Kilimani, Nairobi/);
+    expect((await outbox()).at(-1)).toMatch(/deliver to your door in Kilimani, Nairobi/);
     const cols = (await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND (column_name ILIKE '%lat%' OR column_name ILIKE '%lon%' OR column_name ILIKE '%coord%')`)).rows;
     expect(cols).toEqual([]);
     const inbox = (await pool.query(`SELECT place_county, place_area FROM channel_inbox`)).rows;
@@ -470,9 +470,9 @@ describe("the whole journey in chat", () => {
     };
     try {
       const first = await send({ image: IMG });
-      expect(first).toMatch(/Delivered to Kenya:\n1\) /);
+      expect(first).toMatch(/To collect in Nairobi, all costs in:\n1\) /);
       expect(first).toMatch(/Reply 1 or 2 to choose\./);
-      expect(first).toMatch(/Deliver to Nairobi\? Reply YES/);
+      expect(first).toMatch(/You collect it in Nairobi at no extra cost/);
       await send({ text: "Westlands" });
       const pick = /(\d)\) Sherpa cat carrier/.exec(first)![1];
       const chosen = await send({ text: pick });

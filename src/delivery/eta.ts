@@ -62,7 +62,7 @@ function legs(lane: Lane, area: Area, handling: "pickup" | "door"): Leg[] {
 }
 
 export function estimateArrival(lane: Lane, now: Date, opts: { area?: Area; handling?: "pickup" | "door" } = {}): Eta {
-  const ls = legs(lane, opts.area ?? "unknown", opts.handling ?? "door");
+  const ls = legs(lane, opts.area ?? "unknown", opts.handling ?? "pickup");
   const kentex = lane === "kentex_amazon" || lane === "kentex_store";
   const run = (end: "low" | "high") => {
     let d = nairobiDate(now);

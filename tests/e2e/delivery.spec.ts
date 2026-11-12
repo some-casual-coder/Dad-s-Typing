@@ -7,7 +7,7 @@ url.pathname = `/${process.env.TEST_DB_NAME ?? "dads_typing_test"}`;
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-test("delivered-to-Kenya cards: one question, price, date, choose", async ({ page }) => {
+test("delivered-to-Kenya cards: pickup by default, door on request, price, date, choose", async ({ page }) => {
   // No external search, so the only import offer is the fixture below
   const made = await page.request.post("/api/tasks", { data: { title: "Cat carrier", starterRoles: ["requester", "chooser", "payer"], seedExternal: false } });
   const { taskId, token } = await made.json();
@@ -28,9 +28,16 @@ test("delivered-to-Kenya cards: one question, price, date, choose", async ({ pag
   await expect(panel).toBeVisible();
   // No form by default: one question with a default
   await expect(panel.getByRole("textbox")).toHaveCount(0);
-  await expect(panel.getByText("Deliver to Nairobi?")).toBeVisible();
-  await panel.getByRole("button", { name: "Yes" }).click();
-  await expect(panel.getByText("Delivering to")).toBeVisible();
+  await expect(panel.getByText("Collect it in Nairobi at no extra cost?")).toBeVisible();
+  await panel.getByRole("button", { name: "Yes, I'll collect" }).click();
+  await expect(panel.getByText("You collect it in")).toBeVisible();
+  const pickupPrice = await panel.locator("li.dcard", { hasText: "Fixture cat carrier" }).locator(".price").textContent();
+  // Door delivery is one tap and a town away, and costs more
+  await panel.getByRole("button", { name: "Deliver to my door instead" }).click();
+  await panel.getByLabel("Town or area to deliver to").fill("Kilimani");
+  await panel.getByRole("button", { name: "Save" }).click();
+  await expect(panel.getByText("Delivering to your door in")).toBeVisible();
+  await expect(panel.locator("li.dcard", { hasText: "Fixture cat carrier" }).locator(".price")).not.toHaveText(pickupPrice!);
 
   const card = panel.locator("li.dcard", { hasText: "Fixture cat carrier" });
   await expect(card).toContainText(/KSh [\d,]+/);

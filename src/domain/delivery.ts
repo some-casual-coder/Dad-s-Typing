@@ -113,7 +113,7 @@ export async function getDelivery(taskId: string, token: string, now = new Date(
     const reference = (t?.search_query || t?.title || "") as string;
     const row = (await c.query(`SELECT * FROM delivery_plans WHERE task_id=$1`, [taskId])).rows[0];
     const input: DeliveryInput = {
-      county: row?.county ?? "", city: row?.city ?? "", handling: row?.handling ?? "door",
+      county: row?.county ?? "", city: row?.city ?? "", handling: row?.handling ?? "pickup",
       budgetKesMinor: row?.budget_kes_minor ?? null, budgetIncludesDelivery: row?.budget_includes_delivery ?? null,
       weightGrams: row?.weight_grams ?? null, lengthMm: row?.length_mm ?? null, widthMm: row?.width_mm ?? null,
       heightMm: row?.height_mm ?? null, hub: row?.hub ?? null,
@@ -148,7 +148,8 @@ export async function getDelivery(taskId: string, token: string, now = new Date(
       const d = done(p);
       return d.length ? [{ planId: p.id, done: d, next: nextAction(p.mode, d) }] : [];
     });
-    const where = row?.county ? { county: row.county as string, area: (row.city as string) ?? "", source: row.source as string, confirmed: row.confirmed as boolean } : null;
+    const where = row?.county ? { county: row.county as string, area: (row.city as string) ?? "", source: row.source as string, confirmed: row.confirmed as boolean,
+      handling: input.handling } : null;
     const cheapestId = cheapestDelivered(plans);
     return { input, plans, cheapestId, cards: present(plans, cheapestId), progress, asOf: RULES_AS_OF, fx, fxSource: fxLabel(fx),
       destination: where, askDestination: !where?.confirmed };

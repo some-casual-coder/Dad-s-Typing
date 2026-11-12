@@ -18,7 +18,7 @@ export async function getDestination(c: Tx, taskId: string): Promise<Destination
 
 export async function putDestination(c: Tx, taskId: string, p: Place, source: DestSource, confirmed: boolean, handling?: "pickup" | "door") {
   await c.query(
-    `INSERT INTO delivery_plans (task_id,county,city,handling,source,confirmed,updated_at) VALUES ($1,$2,$3,COALESCE($6,'door'),$4,$5,now())
+    `INSERT INTO delivery_plans (task_id,county,city,handling,source,confirmed,updated_at) VALUES ($1,$2,$3,COALESCE($6,'pickup'),$4,$5,now())
      ON CONFLICT (task_id) DO UPDATE SET county=$2, city=$3, source=$4, confirmed=$5, handling=COALESCE($6, delivery_plans.handling), updated_at=now()`,
     [taskId, p.county.slice(0, 80), p.area.slice(0, 80), source, confirmed, handling ?? null],
   );
@@ -49,16 +49,24 @@ export async function inferForSender(c: Tx, taskId: string, channel: string, sen
 export const placeLabel = (d: { county: string; area: string }) =>
   !d.area || d.area === d.county ? d.county : d.area.includes(d.county) ? d.area : `${d.area}, ${d.county}`;
 
-export const askLine = (d: Destination | null) =>
-  `Deliver to ${d ? placeLabel(d) : "Nairobi"}? Reply YES, name your town or area, or share a location pin.`;
+// Pickup in Nairobi is the default; a place only matters for door delivery
+export const askLine = (_d?: Destination | null) =>
+  "You collect it in Nairobi at no extra cost. Reply YES, or name your town or share a location pin to have it delivered.";
 
-const YES = /^\s*(yes|yeah|yep|y|ok|okay|sure|ndio|ndiyo|sawa)\b[\s.!]*$/i;
+const YES = /^\s*(yes|yeah|yep|y|ok|okay|sure|ndio|ndiyo|sawa|collect|pickup|pick up)\b[\s.!]*$/i;
+const DOOR = /\b(door|deliver|delivery|bring it|home)\b/i;
 
-// A short chat reply that answers the destination question, or null
-export function answerFromText(text: string, current: Destination | null): Place | null {
-  if (current && YES.test(text)) return { county: current.county, area: current.area };
+export type Answer = Place & { handling: "pickup" | "door" };
+
+// A short chat reply that answers the question, or null. Naming a place
+// means delivery there; YES keeps pickup.
+export function answerFromText(text: string, current: Destination | null): Answer | null {
+  if (current && YES.test(text)) return { county: current.county, area: current.area, handling: "pickup" };
   if (text.length > 60) return null;
-  return placeFromText(text);
+  const p = placeFromText(text);
+  if (p) return { ...p, handling: "door" };
+  if (current && DOOR.test(text)) return { county: current.county, area: current.area, handling: "door" };
+  return null;
 }
 
 // Browser fallback: "yes" to the default or a typed place
@@ -69,6 +77,7 @@ export async function setDestination(taskId: string, token: string, b: { confirm
     const cur = await getDestination(c, taskId);
     let p: Place | null = null;
     if (b.confirm === true) p = cur ? { county: cur.county, area: cur.area } : DEFAULT_PLACE;
+    else if (b.handling === "door" && !b.place && (!cur || cur.source === "country_code")) throw new DomainError("invalid", "Name the town or area to deliver to");
     else if (typeof b.place === "string" && b.place.trim() && b.place.length <= 80) {
       // An unknown town is kept as typed, but never a street address
       const typed = b.place.trim().replace(/\s+/g, " ");

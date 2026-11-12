@@ -192,22 +192,23 @@ async function handleDestination(channel: string, row: Row): Promise<string | nu
   if (row.place_county) {
     const p = { county: row.place_county as string, area: (row.place_area as string) ?? "" };
     await tx(async (c) => {
-      const cur = task ? await getDestination(c, task.taskId) : null;
-      await saveProfile(c, channel, hash, { ...p, handling: cur?.handling ?? "door" });
-      if (task) await putDestination(c, task.taskId, p, "location", true);
+      await saveProfile(c, channel, hash, { ...p, handling: "door" });
+      if (task) await putDestination(c, task.taskId, p, "location", true, "door");
     });
-    return `Got it: I'll deliver to ${placeLabel(p)}. I'll remember this for next time.${task ? `\n\nYour task: ${link(task.taskId, task.token)}` : ""}`;
+    return `Got it: I'll deliver to your door in ${placeLabel(p)}. I'll remember this for next time.${task ? `\n\nYour task: ${link(task.taskId, task.token)}` : ""}`;
   }
   const text = (row.body as string) || "";
   if (!task || !text || row.image_b64) return null;
   return tx(async (c) => {
     const cur = await getDestination(c, task.taskId);
     if (cur?.confirmed) return null;
-    const p = answerFromText(text, cur);
-    if (!p) return null;
-    await putDestination(c, task.taskId, p, "answer", true);
-    await saveProfile(c, channel, hash, { ...p, handling: cur?.handling ?? "door" });
-    return `Delivering to ${placeLabel(p)}. I'll remember this for next time.\n\nYour task: ${link(task.taskId, task.token)}`;
+    const a = answerFromText(text, cur);
+    if (!a) return null;
+    const p = { county: a.county, area: a.area };
+    await putDestination(c, task.taskId, p, "answer", true, a.handling);
+    await saveProfile(c, channel, hash, { ...p, handling: a.handling });
+    const what = a.handling === "pickup" ? "You'll collect it in Nairobi" : `Delivering to your door in ${placeLabel(p)}`;
+    return `${what}. I'll remember this for next time.\n\nYour task: ${link(task.taskId, task.token)}`;
   });
 }
 
@@ -263,8 +264,9 @@ async function optionsBlock(channel: string, hash: string, taskId: string, token
     `INSERT INTO channel_menus (task_id,channel,sender_hash,offer_ids) VALUES ($1,$2,$3,$4)
      ON CONFLICT (task_id,channel,sender_hash) DO UPDATE SET offer_ids=EXCLUDED.offer_ids, created_at=now()`,
     [taskId, channel, hash, cards.map((x) => x.offerId)]));
-  const where = d.destination?.confirmed ? placeLabel(d.destination) : null;
-  return renderOptions(cards, where, compact);
+  const door = d.input.handling === "door";
+  const head = !door ? "To collect in Nairobi, all costs in:" : d.destination?.confirmed ? `Delivered to ${placeLabel(d.destination)}:` : "Delivered to Kenya:";
+  return renderOptions(cards, head, compact);
 }
 
 async function processRow(channel: string, row: Row) {
@@ -282,8 +284,9 @@ async function processRow(channel: string, row: Row) {
   if (fresh && row.body && (await claimExternalSearch(taskId, row.body as string)))
     await seedExternalOffers(taskId, (row.body as string).slice(0, 80)).catch(() => console.error("channel_error", "seed_external"));
   const reply = ex.messages.find((m) => m.role === "assistant")?.body ?? "";
-  const where = dest === "ask" ? askLine(null) : dest === "known"
-    ? `Delivering to ${placeLabel((await tx((c) => getDestination(c, taskId)))!)}, as last time.` : "";
+  const known = dest === "known" ? await tx((c) => getDestination(c, taskId)) : null;
+  const where = dest === "ask" ? askLine() : known
+    ? (known.handling === "pickup" ? "You'll collect it in Nairobi, as last time." : `Delivering to your door in ${placeLabel(known)}, as last time.`) : "";
   const options = await optionsBlock(channel, senderHash(channel, row.sender as string), taskId, token);
   const body = composeReply({ reply, extra: [options, where], proposals: ex.proposals as never, link: link(taskId, token), fresh,
     maxChars: getChannel(channel).maxReplyChars });

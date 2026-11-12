@@ -57,7 +57,7 @@ export interface DeliveryInputs {
 }
 export interface DeliveryView {
   input: DeliveryInputs; plans: Plan[]; cheapestId: string | null; cards: Cards; asOf: string; fxSource: string;
-  destination: { county: string; area: string; source: string; confirmed: boolean } | null; askDestination: boolean;
+  destination: { county: string; area: string; source: string; confirmed: boolean; handling: "pickup" | "door" } | null; askDestination: boolean;
   progress: { planId: string; done: string[]; next: { step: string | null; text: string } }[];
 }
 export interface SendResult { messages: ChatMessage[]; proposals: Proposal[]; clarification: string | null }

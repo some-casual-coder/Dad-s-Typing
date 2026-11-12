@@ -259,8 +259,8 @@ describe("arrival dates", () => {
     const store = estimateArrival("kentex_store", at("2026-11-12"));
     expect(store.latest > amazon.latest).toBe(true);
     expect(store.confidence).toBe("low");
-    const up = estimateArrival("kentex_amazon", at("2026-11-12"), { area: "upcountry" });
-    const nbo = estimateArrival("kentex_amazon", at("2026-11-12"), { area: "nairobi" });
+    const up = estimateArrival("kentex_amazon", at("2026-11-12"), { area: "upcountry", handling: "door" });
+    const nbo = estimateArrival("kentex_amazon", at("2026-11-12"), { area: "nairobi", handling: "door" });
     expect(up.latest > nbo.latest).toBe(true);
   });
 
