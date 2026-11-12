@@ -77,6 +77,18 @@ sequenceDiagram
   C->>A: POST /outbox/{id}/ack (sent / failed / unknown)
 ```
 
+## How we use PayPal, AI and the sponsor tools
+
+| Tool | What it does here | Code |
+|---|---|---|
+| **PayPal Developer Platform (Sandbox)** | Orders v2 creates the order for the exact item and total (`intent: CAPTURE`, `PAY_NOW`, item + shipping breakdown) and captures it when the payer returns; both are idempotent with `PayPal-Request-Id`. An order counts as paid only when the capture is COMPLETED and matches the frozen order, merchant, amount and currency. Payments v2 handles refunds and lookups; a reconciler settles lost replies; webhook signatures are verified when `PAYPAL_WEBHOOK_ID` is set. | `src/adapters/paypal.ts`, `src/payments/` |
+| **Google Gemini 3.8 Flash via OpenRouter** | Reads the shopper's text and photos into structured JSON: the item to search, proposed requirements quoting their words, and one clarifying question. It also reads quote screenshots and frames from the shopper's own clips. It only proposes; people confirm. | `src/adapters/openrouter.ts`, `src/chat/exchange.ts` |
+| **Whisper large v3 turbo via OpenRouter** | Push-to-talk voice transcription, checked by the shopper before sending | `src/adapters/stt.ts` |
+| **Google Gemini API** | The same job called directly; switch with `INTERPRETER_PROVIDER=gemini` | `src/adapters/gemini.ts` |
+| **Supadata** | Reads public TikTok, Instagram and Facebook videos for the product shown, within a credit cap; the result follows up in the WhatsApp chat | `src/adapters/supadata.ts`, `src/sources/` |
+| **Channel3** (sponsor) | Product search across US and UK shops, with weights and sizes where listed, priced delivered to Kenya by `src/delivery` | `src/adapters/channel3.ts` |
+| **Render** (sponsor) | Hosts the app (pre-deploy migrations, health check, edge cache), the WhatsApp connector (worker, persistent disk, private network), Postgres 16 (closed to the internet) and the landing page. Deploys run only after CI passes. | `render.yaml` |
+
 ## Repository layout
 
 | Path | What it holds |
@@ -93,7 +105,6 @@ sequenceDiagram
 | `tests` | Unit and integration tests (vitest) and browser tests (Playwright, `tests/e2e`) |
 | `website` | The one-page landing site (static HTML) |
 | `render.yaml` | The Render setup as a Blueprint |
-| `docs` | Product research, contracts (`API_CONTRACT.md`, `CHANNEL_CONTRACT.md`) and runbooks |
 
 ## Run it locally
 
