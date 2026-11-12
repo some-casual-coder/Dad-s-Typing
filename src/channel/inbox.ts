@@ -4,7 +4,7 @@ import { postExchange } from "@/chat/exchange";
 import { validateImage } from "@/chat/image";
 import { FX_BUFFER_PCT } from "@/delivery/fx";
 import { placeFromPin } from "@/delivery/places";
-import { tx } from "@/domain/db";
+import { tx, type Tx } from "@/domain/db";
 import { subscribe } from "@/domain/concierge";
 import { answerFromText, askLine, getDestination, inferForSender, placeLabel, putDestination, saveProfile } from "@/domain/destination";
 import { DomainError } from "@/domain/errors";
@@ -253,14 +253,25 @@ async function moreComing(channel: string, row: Row): Promise<boolean> {
     [channel, row.sender, row.id, row.created_at, BURST_MS()]))).rowCount;
 }
 
-// Several bodies go out as separate messages, each a few seconds after the last
+// Chat apps read best as short messages: each paragraph is sent on its own,
+// in order, a moment apart (CHANNEL_SPLIT_MESSAGES=0 keeps one per reply)
+export function chatParts(bodies: string | string[], env: Record<string, string | undefined> = process.env): string[] {
+  const all = [bodies].flat().filter(Boolean);
+  if (env.CHANNEL_SPLIT_MESSAGES === "0") return all;
+  return all.flatMap((b) => b.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean));
+}
+
+async function enqueueParts(c: Tx, channel: string, recipient: string, bodies: string | string[], key: string) {
+  for (const [i, b] of chatParts(bodies).entries()) await c.query(
+    `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key,not_before)
+     VALUES ($1,$2,$3,$4,$5, CASE WHEN $6::int > 0 THEN now() + make_interval(secs => 1.5 * $6::int) END) ON CONFLICT (dedupe_key) DO NOTHING`,
+    [randomUUID(), channel, recipient, b, i ? `${key}:${i}` : key, i],
+  );
+}
+
 async function finish(channel: string, row: Row, body: string | string[]) {
   await tx(async (c) => {
-    for (const [i, b] of [body].flat().entries()) await c.query(
-      `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key,not_before)
-       VALUES ($1,$2,$3,$4,$5, CASE WHEN $6::int > 0 THEN now() + make_interval(secs => 3 * $6::int) END) ON CONFLICT (dedupe_key) DO NOTHING`,
-      [randomUUID(), channel, row.sender, b, i ? `inbox:${row.id}:${i}` : `inbox:${row.id}`, i],
-    );
+    await enqueueParts(c, channel, row.sender as string, body, `inbox:${row.id}`);
     await c.query(`UPDATE channel_inbox SET state='done', image_b64=NULL, sender='', body='', place_county=NULL, place_area=NULL, contact_name=NULL, locked_until=NULL WHERE id=$1`, [row.id]);
   });
 }
@@ -433,12 +444,11 @@ export async function videoFollowUp(attemptId: string) {
     body = [
       `From the ${name} video, I think it's *${proposed[0].label}*.${others.length ? ` I also spotted: ${others.join(", ")}. Send the name if you meant one of those.` : ""}`,
       options || "I'm still finding where to buy it. Screenshots of the product help me narrow it down.",
+      "*Not quite right? Send photos or screenshots of the product. I read those much better than videos.*",
       `Your task: ${link(a.task_id, token)}`,
     ].join("\n\n");
   }
-  await tx((c) => c.query(
-    `INSERT INTO channel_outbox (id,channel,recipient,body,dedupe_key) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (dedupe_key) DO NOTHING`,
-    [randomUUID(), who.channel, to, body, `video:${attemptId}`]));
+  await tx((c) => enqueueParts(c, who.channel, to, body, `video:${attemptId}`));
 }
 
 const UNOPENED = "I couldn't open that photo or attachment here, so I haven't used it. Send a screenshot or tell me what you're looking for.";
@@ -493,15 +503,18 @@ async function processRow(channel: string, row: Row) {
   // Someone who opted out gets replies to what they send, but no order updates until they JOIN again
   await tx(async (c) => { if (!(await optedOut(c, channel, hash))) await subscribe(c, taskId, channel, hash, row.sender as string, true); });
   const ex = await postExchange(taskId, token, { channel, key: `${channel}:${row.provider_message_id}`, text: (row.body as string) || undefined, image });
-  // No item named by the AI: search the words they sent, once
+  // No item named by the AI: search the words they sent, once. Not for a
+  // shared post: "my mom wants this" around a link is not a product
   const words = withoutSocialLinks((row.body as string) ?? "");
-  if (fresh && words && (await claimExternalSearch(taskId, words)))
+  const shared = findLinks((row.body as string) ?? "").some((f) => f.type === "social");
+  if (fresh && words && !shared && (await claimExternalSearch(taskId, words)))
     await seedExternalOffers(taskId, words.slice(0, 80)).catch(() => console.error("channel_error", "seed_external"));
   const reply = ex.messages.find((m) => m.role === "assistant")?.body ?? "";
   const known = dest === "known" ? await tx((c) => getDestination(c, taskId)) : null;
   const where = dest === "ask" ? askLine() : known
     ? (known.handling === "pickup" ? "You'll collect it in Nairobi, as last time." : `Delivering to your door in ${placeLabel(known)}, as last time.`) : "";
-  const options = await optionsBlock(channel, senderHash(channel, row.sender as string), taskId, token);
+  // A shared post names nothing yet: options wait for the video check or a screenshot
+  const options = shared ? "" : await optionsBlock(channel, senderHash(channel, row.sender as string), taskId, token);
   const body = composeReply({ reply, extra: [row.attachment_error ? UNOPENED : "", options, where], proposals: ex.proposals as never, link: link(taskId, token), fresh,
     maxChars: getChannel(channel).maxReplyChars });
   await finish(channel, row, (await moreComing(channel, row)) ? [] : body);

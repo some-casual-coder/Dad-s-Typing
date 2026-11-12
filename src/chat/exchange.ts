@@ -71,7 +71,10 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   const proposals = (result?.proposedRequirements ?? []).slice(0, 10);
   const clarification = result?.clarification ? scrubModelText(result.clarification) || null : null;
   const said = result ? scrubModelText(result.reply ?? "") || FALLBACK : "";
-  const reply = [said, intake.ack].filter(Boolean).join(" ").slice(0, 2000) || FALLBACK;
+  // While a shared video is being checked, its acknowledgement is the whole
+  // reply: the model only saw the words around the link and would guess
+  const checking = intake.toSubmit.length > 0;
+  const reply = (checking ? intake.ack : [said, intake.ack].filter(Boolean).join(" ")).slice(0, 2000) || FALLBACK;
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
   const item = result?.item;
   // A photo start has no words until the AI names the item
@@ -80,7 +83,7 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   // edited later, so a channel waits for the search on the item the AI named.
   // A task started from a link searches again once the item is known, and so
   // does one where a later photo or label names the item more exactly.
-  const search = item ? claimExternalSearch(taskId, item).then((first) => (first || intake.linkTask || sharper(known, item) ? searchFor(taskId, item, first) : undefined))
+  const search = item && !checking ? claimExternalSearch(taskId, item).then((first) => (first || intake.linkTask || sharper(known, item) ? searchFor(taskId, item, first) : undefined))
     .catch(() => console.error("channel_error", "seed_external")) : null;
   if (search && input.channel) await search;
   for (const id of intake.toSubmit) void submitPending(id).catch(() => console.error("source_error", "submit"));

@@ -31,22 +31,17 @@ export const START_TEXT = "Hi My Plug! I'd like to try it out.";
 const START = /^\s*hi\W*\s*my\s+plug\b/i;
 export const isStart = (text?: string, env = process.env) => env.CHANNEL_OPEN_START === "1" && !!text && START.test(text);
 
+// Short paragraphs: each one goes out as its own WhatsApp message
 export const INTRO = [
   `Hi! I'm *${BOT_NAME}*. I help you buy things from shops abroad and get them to you in Kenya.`,
   "",
-  "*How it works*",
-  "1. Send a photo, a link or a few words about what you want.",
-  "2. I find options and show the full cost in KSh, delivery included.",
-  "3. Reply with a number to pick one, then pay with PayPal.",
-  "4. Share the link so family can help choose or pay.",
+  "*How it works*\n1. Send a photo or a few words about what you want.\n2. I show options with the full cost in KSh.\n3. Reply with a number, then pay with PayPal.",
   "",
-  "Forwarding messages from a family chat works too: send them one after another and I'll treat them as one request.",
+  "You can forward messages from a family chat too, one after another. TikTok, Instagram and Facebook links work as well (_links are in beta, so photos work best_).",
   "",
-  "Send *NEW* any time to start a new search, or *DONE* when you're finished.",
+  "Send *NEW* to start a new search, or *DONE* when you're finished.",
   "",
-  "Try it now: send a photo of something you'd like.",
-  "",
-  "_This is a demo: PayPal runs in test mode, so no real money moves. Photos and messages are read by an AI service to help with your request._",
+  "_Demo: PayPal runs in test mode, so no real money moves. An AI service reads what you send._",
 ].join("\n");
 export const SAVE_NAME = `BTW, save this number as *${BOT_NAME}* so you can find me easily.`;
 

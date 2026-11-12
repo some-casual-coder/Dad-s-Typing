@@ -737,3 +737,31 @@ describe("video check follow-up on WhatsApp", () => {
     expect(await last()).toMatch(/^I checked the Instagram video but couldn't make out the product clearly\. Send me screenshots of it here/);
   });
 });
+
+describe("short chat messages", () => {
+  it("sends each paragraph on its own, in order, and keeps lists together", async () => {
+    const { chatParts } = await import("@/channel/inbox");
+    const { INTRO } = await import("@/channel/join");
+    const parts = chatParts([INTRO, "BTW"], { CHANNEL_SPLIT_MESSAGES: "1" });
+    expect(parts[0]).toMatch(/^Hi! I'm \*My Plug\*/);
+    expect(parts[1]).toMatch(/^\*How it works\*\n1\. .+\n2\. .+\n3\. /);
+    expect(parts.at(-1)).toBe("BTW");
+    expect(parts.every((p) => p.split("\n").length <= 4)).toBe(true);
+    expect(chatParts("a\n\nb", { CHANNEL_SPLIT_MESSAGES: "0" })).toEqual(["a\n\nb"]);
+  });
+
+  it("a shared link being checked gets only the acknowledgement, with no guessed options", async () => {
+    process.env.SUPADATA_ENABLED = "1"; process.env.SUPADATA_API_KEY = "k"; process.env.SUPADATA_PLATFORMS = "facebook";
+    process.env.SUPADATA_ALLOW_ANY_POST = "1"; process.env.SUPADATA_CREDIT_CEILING = "100";
+    try {
+      interpret.mockResolvedValueOnce({ observations: [], proposedRequirements: [], clarification: null, reply: "It looks like the photo didn't come through!", item: "mom gift" });
+      await signed(inbound, IN, msg({ text: "my mom wants this: https://www.facebook.com/reel/1082445597513836" }));
+      await processInboxOnce("whatsapp");
+      const body = (await pool.query(`SELECT body FROM channel_outbox ORDER BY created_at DESC LIMIT 1`)).rows[0].body as string;
+      expect(body).toMatch(/^Got the Facebook link\. I'm checking the video now/);
+      expect(body).not.toMatch(/didn't come through|Reply 1/);
+    } finally {
+      for (const k of ["SUPADATA_ENABLED", "SUPADATA_API_KEY", "SUPADATA_PLATFORMS", "SUPADATA_ALLOW_ANY_POST", "SUPADATA_CREDIT_CEILING"]) delete process.env[k];
+    }
+  });
+});
