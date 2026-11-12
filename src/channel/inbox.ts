@@ -238,7 +238,7 @@ async function resolveTask(channel: string, row: Row) {
       dest = await inferForSender(c, ids.taskId, channel, hash, row.sender as string);
     },
   });
-  await seedDemoOffers(made.taskId).catch(() => console.error("channel_error", "seed_demo"));
+  await seedDemoOffers(made.taskId, title).catch(() => console.error("channel_error", "seed_demo"));
   return { taskId: made.taskId, token: made.token, fresh: true, dest };
 }
 

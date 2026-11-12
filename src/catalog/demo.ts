@@ -4,7 +4,8 @@ import { getDiscovery } from "@/adapters";
 import { AdapterError } from "@/adapters/types";
 
 // SYNTHETIC catalogue for sandbox demos and tests. Not a real seller or real
-// stock, so it is off unless DEMO_CATALOGUE=1: real requests see real results.
+// stock, so it is off unless DEMO_CATALOGUE=1. Like any shop it only shows up
+// for what it sells: pet carriers. Everything else sees real results only.
 export const DEMO_SELLER = "Whisker & Co (demo)";
 const SPEC = "demo spec sheet";
 
@@ -20,9 +21,12 @@ export const DEMO_SKUS: Sku[] = [
 ];
 
 export const demoCatalogueOn = (env = process.env) => env.DEMO_CATALOGUE === "1";
+const SELLS = /\b(carriers?|crates?|pet ?bags?|cats?|kittens?|dogs?|pupp(?:y|ies)|pets?)\b/i;
+export const demoFits = (about?: string | null) => !!about && SELLS.test(about);
 
-export async function seedDemoOffers(taskId: string, merchantId = process.env.PAYPAL_MERCHANT_ID) {
-  if (!demoCatalogueOn()) return;
+// Safe to call again: offers upsert on (task, source, sku)
+export async function seedDemoOffers(taskId: string, about: string | null | undefined, merchantId = process.env.PAYPAL_MERCHANT_ID) {
+  if (!demoCatalogueOn() || !demoFits(about)) return;
   if (!merchantId) throw new Error("PAYPAL_MERCHANT_ID is not set");
   await recordOffers(taskId, DEMO_SKUS.map((s) => {
     const attributes: Record<string, Attribute> = { internal_length_cm: { value: s.lengthCm, unit: "cm", source: SPEC } };

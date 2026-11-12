@@ -5,6 +5,7 @@ import { DomainError } from "@/domain/errors";
 import { getExchange, recordAssistantMessage } from "@/domain/messages";
 import { addMessage, getComparison } from "@/domain/tasks";
 import { claimExternalSearch } from "@/domain/offers";
+import { seedDemoOffers } from "@/catalog/demo";
 import { channelIds } from "@/channel/registry";
 import { intakeLinks, searchFor } from "@/sources/flow";
 import { submitPending } from "@/sources/intake";
@@ -73,6 +74,8 @@ export async function postExchange(taskId: string, token: string, input: Exchang
   const reply = [said, intake.ack].filter(Boolean).join(" ").slice(0, 2000) || FALLBACK;
   await recordAssistantMessage(taskId, reply, { key: input.key, result: { proposals, clarification } });
   const item = result?.item;
+  // A photo start has no words until the AI names the item
+  if (item) await seedDemoOffers(taskId, item).catch(() => console.error("api_error", "seed_demo"));
   // The browser's next poll picks the offers up; a chat reply cannot be
   // edited later, so a channel waits for the search on the item the AI named.
   // A task started from a link searches again once the item is known, and so

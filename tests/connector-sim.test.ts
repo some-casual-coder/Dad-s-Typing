@@ -67,10 +67,11 @@ const count = async (q: string, a: unknown[] = []) => (await pool.query(q, a)).r
 const tasks = () => count(`SELECT count(*)::int n FROM tasks`);
 
 beforeEach(async () => {
-  interpret.mockReset().mockImplementation(async (i: { text?: string }) => {
+  interpret.mockReset().mockImplementation(async (i: { text?: string; image?: unknown }) => {
     const t = i.text ?? "";
     const opening = /front/i.test(t) ? "front" : /top/i.test(t) ? "top" : null;
-    return { observations: [], clarification: null, reply: "Got it.",
+    // Like the real model: a carrier photo or the words name the item
+    return { observations: [], clarification: null, reply: "Got it.", item: i.image || /carrier/i.test(t) ? "cat carrier" : "",
       proposedRequirements: opening ? [{ key: "opening", op: "eq", value: opening, essential: true, quote: t.slice(0, 40) }] : [] };
   });
   await pool.query("TRUNCATE channel_outbox, channel_inbox, channel_identities, channel_status, sender_profiles, channel_menus, channel_subscriptions, channel_admitted_senders, channel_join_codes");
