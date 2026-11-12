@@ -1,3 +1,4 @@
+import type { Extracted } from "@/delivery/extract";
 import type { Cards } from "@/delivery/present";
 import type { Plan } from "@/delivery/types";
 import { newId, tokenKey, type NextAction, type OfferStatus, type Role } from "./format";
@@ -111,6 +112,7 @@ export const api = {
   saveDelivery: (id: string, token: string, body: DeliveryInputs) => call<{ ok: true }>("PUT", `${t(id)}/delivery`, { token, body }),
   addQuote: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/quotes`, { token, body }),
   markStep: (id: string, token: string, body: Record<string, unknown>) => call<{ ok: true }>("POST", `${t(id)}/delivery/steps`, { token, body }),
+  extractQuote: (id: string, token: string, body: { imageBase64: string; mime: string }) => call<Extracted>("POST", `${t(id)}/delivery/extract`, { token, body }),
   cancelOrder: (id: string, token: string) => call<{ ok: true }>("POST", `${t(id)}/order/cancel`, { token, body: {} }),
   decideExtra: (id: string, token: string, decision: "approved" | "declined") => call<{ ok: true }>("POST", `${t(id)}/order/extra`, { token, body: { decision } }),
   setDestination: (id: string, token: string, body: { confirm?: boolean; place?: string; handling?: "pickup" | "door" }) =>

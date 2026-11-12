@@ -1,6 +1,7 @@
+import { EXTRACT_PROMPT, EXTRACT_SCHEMA, validateExtracted, type Extracted } from "@/delivery/extract";
 import { SCHEMA, SYSTEM, validateInterpretation, withRetry } from "./gemini";
 import { failFor, jsonOf, MODEL_TIMEOUT_MS, send } from "./http";
-import { AdapterError, type InterpretInput, type Interpretation, type Interpreter } from "./types";
+import { AdapterError, type Extractor, type InterpretInput, type Interpretation, type Interpreter } from "./types";
 
 type Schema = Record<string, unknown>;
 
@@ -56,6 +57,38 @@ export class OpenRouterInterpreter implements Interpreter {
     return validateInterpretation(parsed, input.text ?? "");
   }
 }
+
+// Quote and confirmation screenshots to fields; the caller shows them for a tap
+export class OpenRouterExtractor implements Extractor {
+  constructor(private apiKey: string, private model: string) {
+    if (!apiKey || !model) throw new AdapterError("unavailable", "OpenRouter is not configured");
+  }
+
+  async extract(image: { mime: string; base64: string }): Promise<Extracted> {
+    const request = () => send("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: this.model, temperature: 0, reasoning: { effort: "low" },
+        messages: [{ role: "system", content: EXTRACT_PROMPT },
+          { role: "user", content: [{ type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}` } }] }],
+        response_format: { type: "json_schema", json_schema: { name: "provider_document", schema: EXTRACT_SCHEMA } },
+      }),
+    }, MODEL_TIMEOUT_MS);
+    const r = await withRetry(request);
+    if (!r.ok) throw failFor(r.status, "OpenRouter");
+    const j = (await jsonOf(r, "OpenRouter")) as { choices?: { message?: { content?: unknown } }[] };
+    const text = j.choices?.[0]?.message?.content;
+    if (typeof text !== "string") throw new AdapterError("unavailable", "invalid model output: empty");
+    try {
+      return validateExtracted(JSON.parse(text));
+    } catch {
+      throw new AdapterError("unavailable", "invalid model output: not JSON");
+    }
+  }
+}
+
+export const extractorFromEnv = (env = process.env): Extractor => new OpenRouterExtractor(env.OPENROUTER_API_KEY ?? "", env.OPENROUTER_MODEL ?? "");
 
 export function openRouterFromEnv(env = process.env): Interpreter {
   return new OpenRouterInterpreter(env.OPENROUTER_API_KEY ?? "", env.OPENROUTER_MODEL ?? "");

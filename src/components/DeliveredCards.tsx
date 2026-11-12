@@ -5,6 +5,7 @@ import type { Component, Plan } from "@/delivery/types";
 import { api, type DeliveryView, type Offer } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import DestinationAsk from "./DestinationAsk";
+import QuoteCapture from "./QuoteCapture";
 
 const STATUS: Record<Component["status"], string> = {
   known: "Known", estimated: "Estimate", included: "Included", unknown: "Not confirmed", not_applicable: "Not needed",
@@ -15,7 +16,7 @@ const PROVIDER: Record<string, string> = { kentex: "Kentex", aquantuo: "Aquantuo
 const amount = (c: Component) => c.minor === undefined || c.status === "included" ? ""
   : `: ${formatMoney(c.minor, c.currency)}${c.highMinor && c.highMinor !== c.minor ? ` to ${formatMoney(c.highMinor, c.currency)}` : ""}`;
 
-function Details({ plan, others, plans }: { plan: Plan; others: string[]; plans: Plan[] }) {
+function Details({ plan, others, plans, quote }: { plan: Plan; others: string[]; plans: Plan[]; quote?: React.ReactNode }) {
   const alt = others.map((id) => plans.find((p) => p.id === id)).filter((p): p is Plan => !!p);
   return (
     <details className="more">
@@ -39,6 +40,7 @@ function Details({ plan, others, plans }: { plan: Plan; others: string[]; plans:
           <p><a href={plan.handoff.officialUrl} target="_blank" rel="noopener noreferrer">Provider page</a>
             {" · "}<a href={plan.handoff.trackingUrl} target="_blank" rel="noopener noreferrer">Provider tracking</a></p>
         )}
+        {quote}
         {alt.length > 0 && (
           <div>
             <p><strong>Other ways to get this</strong></p>
@@ -55,7 +57,7 @@ function Details({ plan, others, plans }: { plan: Plan; others: string[]; plans:
   );
 }
 
-function CardView({ c, plans, canChoose, busy, onChoose }: { c: Card; plans: Plan[]; canChoose: boolean; busy: string | null; onChoose: (offerId: string) => void }) {
+function CardView({ c, plans, canChoose, busy, onChoose, quote }: { c: Card; plans: Plan[]; canChoose: boolean; busy: string | null; onChoose: (offerId: string) => void; quote?: React.ReactNode }) {
   const plan = plans.find((p) => p.id === c.planId)!;
   return (
     <li className={`dcard${c.winner ? " winner" : ""}`}>
@@ -78,7 +80,7 @@ function CardView({ c, plans, canChoose, busy, onChoose }: { c: Card; plans: Pla
           {busy === c.offerId ? "Choosing..." : "Choose this one"}
         </button>
       )}
-      <Details plan={plan} others={c.others} plans={plans} />
+      <Details plan={plan} others={c.others} plans={plans} quote={quote} />
     </li>
   );
 }
@@ -96,7 +98,12 @@ export default function DeliveredCards({ taskId, token, refreshKey, canEdit, can
 
   if (!v) return <section className="card"><p role="status" className="muted">{err || "Working out delivered prices..."}</p></section>;
   const { closest, similar, more, recommendation } = v.cards;
-  const list = (cs: Card[]) => <ul className="dcards">{cs.map((c) => <CardView key={c.planId} c={c} plans={v.plans} canChoose={canChoose} busy={busy} onChoose={onChoose} />)}</ul>;
+  const quoteFor = (c: Card) => {
+    const p = v.plans.find((x) => x.id === c.planId);
+    return canEdit && p && (p.provider === "kentex" || p.provider === "aquantuo")
+      ? <QuoteCapture taskId={taskId} token={token} offerId={p.offerId} provider={p.provider} mode={String(p.mode)} onSaved={load} /> : undefined;
+  };
+  const list = (cs: Card[]) => <ul className="dcards">{cs.map((c) => <CardView key={c.planId} c={c} plans={v.plans} canChoose={canChoose} busy={busy} onChoose={onChoose} quote={quoteFor(c)} />)}</ul>;
   return (
     <section className="card stack" aria-labelledby="dc-h">
       <h2 id="dc-h">Delivered to Kenya</h2>

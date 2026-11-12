@@ -166,7 +166,7 @@ export function buildPlans(i: Inputs): Plan[] {
       id: `${d.offer.id}:${provider}:${d.mode}`, offerId: d.offer.id, route: d.route, provider, mode: d.mode,
       title: TITLES[d.mode as string] ?? `Buy at ${d.offer.seller}`,
       exact: d.offer.exact, match: d.offer.match ?? null, availability: d.availability, item: itemOf(d.offer),
-      why: usable ? `Uses your ${provider} quote.` : q && expired ? "Your saved quote has expired. Get a fresh one." : d.why,
+      why: usable ? `Uses your ${provider === "kentex" ? "Kentex" : "Aquantuo"} quote.` : q && expired ? "Your saved quote has expired. Get a fresh one." : d.why,
       components: parts, complete, primary: d.primary, confidence: overallConfidence(parts), parcel: d.parcel,
       eta: laneOf(d) ? estimateArrival(laneOf(d)!, i.now, { area: areaOf(i.destination), handling: i.prefs.handling }) : null,
       knownMinor: sums.single?.low ?? null, knownHighMinor: sums.single?.high ?? null,

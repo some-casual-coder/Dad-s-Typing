@@ -1,3 +1,4 @@
+import type { Extracted } from "@/delivery/extract";
 import type { Attribute, Op } from "@/domain/eligibility";
 import type { ObservedCapture } from "@/domain/payments";
 import type { ObservedRefund } from "@/domain/refunds";
@@ -41,6 +42,10 @@ export interface ExternalOffer {
 export interface OfferSpecs {
   weightGrams?: number; lengthMm?: number; widthMm?: number; heightMm?: number;
   dimsSource?: string; category?: string[]; brand?: string; imageUrl?: string;
+}
+
+export interface Extractor {
+  extract(image: { mime: string; base64: string }): Promise<Extracted>;
 }
 
 export interface FxSource {

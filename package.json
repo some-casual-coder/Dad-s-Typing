@@ -13,6 +13,7 @@
     "check:providers": "node --env-file=.env.local scripts/provider-check.mjs",
     "live:stt": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts stt",
     "live:providers": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts providers",
+    "live:extract": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts extract",
     "live:merchant": "node --env-file=.env.local node_modules/vitest/vitest.mjs run --config vitest.live.config.ts discover-merchant",
     "test:e2e": "playwright test"
   },
